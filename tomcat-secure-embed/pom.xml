@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.tamacat</groupId>
+    <artifactId>tomcat-secure-parent</artifactId>
+    <version>11.0.27-1</version>
+  </parent>
+
+  <artifactId>tomcat-secure-embed</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Tomcat Secure Embed</name>
+  <description>
+    Apache Tomcat ${tomcat.version} embedded (core + EL + Jasper) rebuilt from the
+    official sources with HTTP/2, WebSocket/HTTP Upgrade, AJP, TLS/OpenSSL/APR,
+    RewriteValve, Realms/Authenticators, session persistence/clustering,
+    CGI/WebDAV/Manager removed.
+  </description>
+
+  <dependencies>
+    <!-- Only runtime dependency: Eclipse JDT compiler used by Jasper to compile JSPs -->
+    <dependency>
+      <groupId>org.eclipse.jdt</groupId>
+      <artifactId>ecj</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+          <compilerArgs>
+            <arg>-Xlint:-options</arg>
+            <arg>-Xmaxerrs</arg>
+            <arg>10000</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Automatic-Module-Name>org.tamacat.tomcat.secure</Automatic-Module-Name>
+              <Implementation-Title>Tomcat Secure Embed</Implementation-Title>
+              <Implementation-Version>${project.version}</Implementation-Version>
+              <X-Upstream-Tomcat-Version>${tomcat.version}</X-Upstream-Tomcat-Version>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- English log messages; open the JDK internals Tomcat's memory leak detection inspects (avoids
+               warnings on web application stop) -->
+          <argLine>-Duser.language=en -Duser.country=US
+            --add-opens=java.base/java.lang=ALL-UNNAMED
+            --add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED</argLine>
+          <systemPropertyVariables>
+            <java.util.logging.config.file>${project.basedir}/src/test/resources/logging.properties</java.util.logging.config.file>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals><goal>jar-no-fork</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

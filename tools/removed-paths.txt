@@ -1,0 +1,130 @@
+# Paths (relative to src/main/java or src/main/resources) deleted from the
+# upstream Apache Tomcat embed sources. Directories are removed recursively.
+# Matching resources (LocalStrings*.properties, mbeans-descriptors.xml) are
+# removed together with their package.
+#
+# Format: <path>   # reason
+
+# ---------------------------------------------------------------- HTTP/2, upgrade, WebSocket
+org/apache/coyote/http2                                   # HTTP/2 (h2, h2c)
+org/apache/coyote/http11/upgrade                          # HTTP Upgrade (base of WebSocket / h2c)
+org/apache/coyote/UpgradeProtocol.java                    # HTTP Upgrade
+org/apache/coyote/UpgradeToken.java                       # HTTP Upgrade
+
+# ---------------------------------------------------------------- AJP (Apache httpd / mod_jk / mod_proxy_ajp)
+org/apache/coyote/ajp                                     # AJP connector (Ghostcat etc.)
+org/apache/catalina/valves/LoadBalancerDrainingValve.java # mod_jk load-balancer integration
+
+# ---------------------------------------------------------------- TLS / OpenSSL / native (APR)
+org/apache/tomcat/jni                                     # native libtcnative (APR / OpenSSL)
+org/apache/tomcat/util/net/openssl                        # OpenSSL
+org/apache/tomcat/util/openssl                            # OpenSSL FFM (Panama) bindings
+org/apache/tomcat/util/net/jsse                           # JSSE (TLS)
+org/apache/tomcat/util/net/SSLContext.java                # TLS
+org/apache/tomcat/util/net/SSLContextWrapper.java         # TLS
+org/apache/tomcat/util/net/SSLHostConfig.java             # TLS
+org/apache/tomcat/util/net/SSLHostConfigCertificate.java  # TLS
+org/apache/tomcat/util/net/SSLImplementation.java         # TLS
+org/apache/tomcat/util/net/SSLSessionManager.java         # TLS
+org/apache/tomcat/util/net/SSLSupport.java                # TLS
+org/apache/tomcat/util/net/SSLUtil.java                   # TLS
+org/apache/tomcat/util/net/SSLUtilBase.java               # TLS
+org/apache/tomcat/util/net/SecureNioChannel.java          # TLS
+org/apache/tomcat/util/net/SecureNio2Channel.java         # TLS
+org/apache/tomcat/util/net/TLSClientHelloExtractor.java   # TLS
+org/apache/catalina/core/AprLifecycleListener.java        # native APR
+org/apache/catalina/core/AprStatus.java                   # native APR
+org/apache/catalina/core/JniLifecycleListener.java        # native JNI
+org/apache/catalina/core/OpenSSLLifecycleListener.java    # OpenSSL
+org/apache/catalina/security/TLSCertificateReloadListener.java # TLS
+org/apache/catalina/util/TLSUtil.java                     # TLS
+org/apache/catalina/valves/SSLValve.java                  # TLS info from front-end proxy (mod_ssl)
+
+# ---------------------------------------------------------------- NIO2 (only the NIO connector is kept)
+org/apache/coyote/http11/Http11Nio2Protocol.java          # NIO2 connector
+org/apache/tomcat/util/net/Nio2Endpoint.java              # NIO2 connector
+org/apache/tomcat/util/net/Nio2Channel.java               # NIO2 connector
+
+# ---------------------------------------------------------------- Rewrite
+org/apache/catalina/valves/rewrite                        # RewriteValve
+
+# ---------------------------------------------------------------- Container authentication / Realm / Jakarta Authentication
+org/apache/catalina/realm                                 # Realms
+org/apache/catalina/authenticator                         # BASIC/FORM/DIGEST/SPNEGO/SSL authenticators + JASPIC
+jakarta/security/auth/message                             # Jakarta Authentication (JASPIC) API
+org/apache/catalina/users                                 # UserDatabase (tomcat-users.xml)
+org/apache/catalina/Realm.java                            # Realm
+org/apache/catalina/Authenticator.java                    # Authenticator
+org/apache/catalina/CredentialHandler.java                # Realm credential handler
+org/apache/catalina/TomcatPrincipal.java                  # Realm principal
+org/apache/catalina/User.java                             # UserDatabase
+org/apache/catalina/Group.java                            # UserDatabase
+org/apache/catalina/Role.java                             # UserDatabase
+org/apache/catalina/UserDatabase.java                     # UserDatabase
+org/apache/catalina/core/PropertiesRoleMappingListener.java # Realm role mapping
+org/apache/catalina/connector/CoyotePrincipal.java        # AJP/IIS "tomcatAuthentication=false" principal
+org/apache/catalina/startup/Authenticators.properties     # Authenticator registry
+org/apache/catalina/startup/RealmRuleSet.java             # server.xml <Realm>
+org/apache/catalina/startup/CredentialHandlerRuleSet.java # server.xml <CredentialHandler>
+org/apache/catalina/startup/UserDatabase.java             # UserConfig
+org/apache/catalina/startup/HomesUserDatabase.java        # UserConfig
+org/apache/catalina/startup/PasswdUserDatabase.java       # UserConfig
+org/apache/catalina/startup/UserConfig.java               # ~user web applications
+org/apache/catalina/mbeans/GroupMBean.java                # UserDatabase JMX
+org/apache/catalina/mbeans/RoleMBean.java                 # UserDatabase JMX
+org/apache/catalina/mbeans/UserMBean.java                 # UserDatabase JMX
+org/apache/catalina/mbeans/MemoryUserDatabaseMBean.java   # UserDatabase JMX
+org/apache/catalina/mbeans/DataSourceUserDatabaseMBean.java # UserDatabase JMX
+org/apache/catalina/mbeans/SparseUserDatabaseMBean.java   # UserDatabase JMX
+org/apache/catalina/mbeans/GlobalResourcesLifecycleListener.java # UserDatabase JMX
+org/apache/catalina/mbeans/MBeanFactory.java              # JMX factory able to create connectors/realms/valves
+
+# ---------------------------------------------------------------- Session persistence (JDBC / file store) and clustering
+org/apache/catalina/session/DataSourceStore.java          # JDBC session store
+org/apache/catalina/session/FileStore.java                # file session store (deserialization)
+org/apache/catalina/session/StoreBase.java                # session store
+org/apache/catalina/session/PersistentManager.java        # persistent session manager
+org/apache/catalina/session/PersistentManagerBase.java    # persistent session manager
+org/apache/catalina/Store.java                            # session store
+org/apache/catalina/StoreManager.java                     # session store
+org/apache/catalina/valves/PersistentValve.java           # session store
+org/apache/catalina/Cluster.java                          # clustering
+org/apache/catalina/DistributedManager.java               # clustering
+
+# ---------------------------------------------------------------- Other attack surface
+org/apache/catalina/manager                               # Manager / Host-Manager / JMXProxy servlets
+org/apache/catalina/servlets/CGIServlet.java              # CGI
+org/apache/catalina/servlets/WebdavServlet.java           # WebDAV
+org/apache/catalina/servlets/DataSourcePropertyStore.java # WebDAV (JDBC)
+org/apache/catalina/valves/JDBCAccessLogValve.java        # JDBC access log
+org/apache/catalina/startup/Bootstrap.java                # standalone server (server.xml)
+org/apache/catalina/startup/Catalina.java                 # standalone server (server.xml)
+org/apache/catalina/startup/Tool.java                     # standalone tool launcher
+org/apache/catalina/startup/ClassLoaderFactory.java       # standalone class loaders
+org/apache/catalina/startup/ConnectorCreateRule.java      # server.xml <Connector>
+org/apache/catalina/startup/CertificateCreateRule.java    # server.xml <Certificate>
+org/apache/catalina/startup/AddPortOffsetRule.java        # server.xml
+org/apache/catalina/startup/EngineRuleSet.java            # server.xml <Engine>
+org/apache/catalina/startup/HostRuleSet.java              # server.xml <Host>
+
+# ---------------------------------------------------------------- Jasper tooling that needs Apache Ant
+org/apache/jasper/compiler/AntCompiler.java               # Ant based JSP compiler (ECJ is used)
+org/apache/jasper/JspC.java                               # Ant based JSP pre-compiler
+
+# ---------------------------------------------------------------- Auto deployment / misc
+org/apache/catalina/startup/HostConfig.java               # automatic deployment of WARs/dirs/XML descriptors from appBase
+org/apache/naming/factory/MailSessionFactory.java         # JNDI Jakarta Mail (needs jakarta.mail)
+org/apache/naming/factory/SendMailFactory.java            # JNDI Jakarta Mail (needs jakarta.mail)
+org/apache/catalina/util/CustomObjectInputStream.java     # session deserialization (persistence removed)
+org/apache/catalina/startup/CatalinaProperties.java       # conf/catalina.properties loader for the standalone server
+org/apache/catalina/startup/catalina.properties           # conf/catalina.properties defaults for the standalone server
+org/apache/tomcat/util/xreflection                        # build-time code generator (dev tool with main())
+
+# ---------------------------------------------------------------- JNDI
+org/apache/naming                                         # JNDI implementation (java:comp/env), object factories (BeanFactory etc.)
+org/apache/catalina/core/NamingContextListener.java       # JNDI context creation / resource binding
+org/apache/catalina/core/ContextNamingInfoListener.java   # JNDI env entries for context name / path
+org/apache/catalina/mbeans/NamingResourcesMBean.java      # JMX creation of JNDI resources
+org/apache/catalina/mbeans/ContextEnvironmentMBean.java   # JMX JNDI environment entries
+org/apache/catalina/mbeans/ContextResourceMBean.java      # JMX JNDI resources
+org/apache/catalina/mbeans/ContextResourceLinkMBean.java  # JMX JNDI resource links
