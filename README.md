@@ -24,7 +24,7 @@ Apache Tomcat **11.0.27**（2026-10 時点の 11 系最新）の公式ソース�
 | セッション永続化 | JDBC（`DataSourceStore`）, `FileStore`, `PersistentManager`, `PersistentValve`, `StandardManager` の SESSIONS.ser 保存（デシリアライズ）, `CustomObjectInputStream` |
 | クラスタリング | `Cluster`, `DistributedManager` |
 | JNDI | `org.apache.naming`（`java:comp/env`, `BeanFactory` 等のオブジェクトファクトリ）, `NamingContextListener`, `ContextNamingInfoListener`, JNDI リソース作成用 MBean, `Tomcat.enableNaming()` |
-| その他の攻撃面 | NIO2 コネクタ, CGI, WebDAV, Manager / Host-Manager / JMXProxy サーブレット, `JDBCAccessLogValve`, `SSLValve`, server.xml 起動系（`Catalina` / `Bootstrap`）, 自動デプロイ（`HostConfig`）, `MBeanFactory`, EJB / JPA / JAX-WS インジェクション, javax→jakarta 変換, ビルド時ツール |
+| その他の攻撃面 | NIO2 コネクタ, CGI, WebDAV, Manager / Host-Manager / JMXProxy サーブレット, `JDBCAccessLogValve`, `SSLValve`, server.xml 起動系（`Catalina` / `Bootstrap`）, 自動デプロイ（`HostConfig`）, `MBeanFactory`, EJB / JPA / JAX-WS インジェクション, javax→jakarta 変換, ビルド時ツール, シャットダウンポート（平文の SHUTDOWN コマンド受付）, `DefaultServlet` のディレクトリ一覧（HTML / XML / XSLT）, セッションの Java シリアライズ |
 
 削除パスの一覧と理由: [tools/removed-paths.txt](tools/removed-paths.txt)
 
@@ -35,6 +35,10 @@ Apache Tomcat **11.0.27**（2026-10 時点の 11 系最新）の公式ソース�
 - `web.xml` の `<security-constraint>` / `<login-config>`、`@ServletSecurity`、`ServletRegistration.setServletSecurity()` → コンテキスト起動失敗
 - `HttpServletRequest.login()` / `authenticate()` → `ServletException`、`isUserInRole()` → 常に `false`
 - `DefaultServlet` の `readonly=false` → 起動失敗（PUT/DELETE によるファイル書き込みは不可。CVE-2025-24813 / CVE-2017-12617 系）
+- `DefaultServlet` の `listings=true` → 起動失敗（ディレクトリ一覧は削除済み）
+- `Connector.setProperty("SSLEnabled", "true")` → 例外（HTTPS のつもりで平文 HTTP になるのを防ぐ）
+- `StandardServer.setPort()` に -1 / -2 以外 → 例外（シャットダウンポートは削除済み）
+- `HttpSession` の Java シリアライズ／デシリアライズ → 常に例外
 - `ProtocolHandler.create()` は HTTP/1.1 以外を拒否（任意クラス名からのプロトコル生成を廃止）
 - 永続化された FORM 認証情報を含むセッションのデシリアライズを拒否
 - JNDI 定義（web.xml の `<env-entry>` / `<resource-ref>` / `<resource-env-ref>` / `<ejb-ref>` / `<service-ref>` 等、context.xml の `<Resource>` / `<Environment>` / `<ResourceLink>`、`@Resource`）、`useNaming=true` → コンテキスト起動失敗
@@ -44,11 +48,12 @@ DataSource や設定値は JNDI ではなく、アプリケーション側（Spr
 
 ## 上流ソースへの変更点（デフォルト値の強化）
 
-- `StandardServer` のシャットダウンポート: 既定 `8005` → **無効（-1）**
+- `StandardServer` のシャットダウンポート: 既定 `8005` → **無効（-1）**、ソケット自体を削除
+- `DefaultInstanceManager`: JNDI と無関係に `@PostConstruct` / `@PreDestroy` を呼ぶ（上流は JNDI 無効時に `@PostConstruct` を呼ばない）
 - `ErrorReportValve`: スタックトレース・サーバーバージョンを**既定で非表示**
 - `DefaultServlet`: 常に読み取り専用、partial PUT 無効、サーバー情報非表示
 
-変更差分（58 ファイル）: [patches/tomcat-secure.patch](patches/tomcat-secure.patch)
+変更差分（59 ファイル）: [patches/tomcat-secure.patch](patches/tomcat-secure.patch)
 
 ## 使い方
 
@@ -107,12 +112,25 @@ mvn clean verify
 
 （機能を削除した後は `clean` してください。`target/` に古いクラスが残るとテストが検出して失敗します）
 
-テスト（76 件）は、Servlet / JSP / EL / 静的ファイル / セッションの動作に加え、次を検証します。
+テスト（83 件）は、Servlet / JSP / EL / 静的ファイル / セッションの動作に加え、次を検証します。
 
 - HTTP/2 プリフェイス・h2c Upgrade・WebSocket ハンドシェイクが受け付けられないこと、HTTP/2 クライアントが HTTP/1.1 にフォールバックすること
 - 削除したクラス・パッケージがビルド成果物に存在しないこと
 - セキュリティ制約・ログイン設定・`@ServletSecurity`・書き込み可能 DefaultServlet・JNDI 定義（`<env-entry>` / `<resource-ref>` / context.xml `<Resource>` / `@Resource`）でアプリが起動しないこと、`java:comp/env` が引けないこと
 - エラーページに例外内容が出ないこと、セキュリティヘッダ、Cookie 属性、TRACE / PUT / `%2F` の拒否
+- ディレクトリ一覧・シャットダウンポート・`SSLEnabled`・セッションのシリアライズが拒否されること、`@PostConstruct` / `@PreDestroy` が呼ばれること
+- 不正なコンテキストパスの拒否、作業ディレクトリ削除がリンク（シンボリックリンク / ジャンクション）をたどらないこと
+
+意図的に起こしたエラーのログはテスト内で捕捉し、期待どおりの理由で失敗したことを検証します（コンソールには出しません）。
+
+## セキュリティチェック（SAST）
+
+```bash
+mvn -Psast clean verify
+```
+
+SpotBugs + FindSecBugs で自作コード（`org.tamacat.*`）を解析し、指摘が 1 件でもあればビルドを失敗させます。
+Tomcat 本体を含む全体スキャンの結果、上流からの削減効果、残存指摘の判断理由は [docs/security-review.md](docs/security-review.md) にまとめています。
 
 ## Tomcat のバージョンアップ手順
 

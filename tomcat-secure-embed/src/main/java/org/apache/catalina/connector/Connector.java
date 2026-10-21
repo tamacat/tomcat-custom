@@ -337,8 +337,15 @@ public class Connector extends LifecycleMBeanBase {
      * @param value the property value
      *
      * @return <code>true</code> if the property was successfully set
+     *
+     * @throws IllegalArgumentException if an attempt is made to enable TLS, which is not supported by this build
      */
     public boolean setProperty(String name, String value) {
+        // Hardened build: TLS has been removed. Fail loudly rather than silently serving plain text HTTP to a caller
+        // that believes TLS has been enabled.
+        if ("SSLEnabled".equalsIgnoreCase(name) && Boolean.parseBoolean(value)) {
+            throw new IllegalArgumentException(sm.getString("coyoteConnector.tlsNotSupported"));
+        }
         if (protocolHandler == null) {
             return false;
         }

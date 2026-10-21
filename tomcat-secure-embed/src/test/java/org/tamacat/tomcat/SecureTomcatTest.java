@@ -230,6 +230,34 @@ class SecureTomcatTest {
     }
 
     @Test
+    void directoryIsNotListed() throws Exception {
+        assertEquals(404, get("/app/subdir/").statusCode());
+        assertEquals("in-subdir", get("/app/subdir/file.txt").body().trim());
+    }
+
+    @Test
+    void directoryListingsCannotBeEnabled() throws Exception {
+        assertFailsToStart(SecureTomcat.builder().port(0).webapp("", webappDir("listings-app")),
+                "listings=true is not supported");
+    }
+
+    @Test
+    void shutdownPortCannotBeEnabled() {
+        org.apache.catalina.core.StandardServer standardServer = new org.apache.catalina.core.StandardServer();
+        assertEquals(-1, standardServer.getPort());
+        assertThrows(IllegalArgumentException.class, () -> standardServer.setPort(8005));
+    }
+
+    @Test
+    void sessionsCannotBeSerialized() throws Exception {
+        org.apache.catalina.session.StandardSession session = new org.apache.catalina.session.StandardSession(null);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.ObjectOutputStream oos = new java.io.ObjectOutputStream(bytes)) {
+            assertThrows(java.io.NotSerializableException.class, () -> oos.writeObject(session));
+        }
+    }
+
+    @Test
     void webInfIsNotServed() throws Exception {
         assertEquals(404, get("/app/WEB-INF/web.xml").statusCode());
     }
@@ -309,6 +337,23 @@ class SecureTomcatTest {
             Tomcat.addServlet(ctx, "injected", TestServlets.ResourceInjectedServlet.class.getName());
             ctx.addServletMappingDecoded("/injected", "injected");
         }), "JNDI has been removed");
+    }
+
+    @Test
+    void lifecycleCallbacksAreInvokedWithoutJndi() throws Exception {
+        TestServlets.LifecycleCallbackServlet.POST_CONSTRUCT.set(0);
+        TestServlets.LifecycleCallbackServlet.PRE_DESTROY.set(0);
+        try (SecureTomcat other = SecureTomcat.builder().port(0).context("", ctx -> {
+            Tomcat.addServlet(ctx, "lifecycle", TestServlets.LifecycleCallbackServlet.class.getName());
+            ctx.addServletMappingDecoded("/lifecycle", "lifecycle");
+        }).build()) {
+            other.start();
+            HttpResponse<String> res = client.send(HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + other.getPort() + "/lifecycle")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals("postConstruct=1", res.body());
+        }
+        assertEquals(1, TestServlets.LifecycleCallbackServlet.PRE_DESTROY.get());
     }
 
     @Test
@@ -401,8 +446,61 @@ class SecureTomcatTest {
     @Test
     void tlsCannotBeEnabled() {
         org.apache.catalina.connector.Connector connector = new org.apache.catalina.connector.Connector();
-        assertFalse(connector.setProperty("SSLEnabled", "true"));
+        assertThrows(IllegalArgumentException.class, () -> connector.setProperty("SSLEnabled", "true"));
+        assertThrows(IllegalArgumentException.class, () -> connector.setProperty("sslenabled", "TRUE"));
         assertNotEquals(Boolean.TRUE, connector.getProperty("SSLEnabled"));
         assertNull(connector.getProperty("sslImplementationName"));
+        // other TLS settings have no setter any more
+        assertFalse(connector.setProperty("keystoreFile", "conf/keystore.jks"));
+    }
+
+    // ------------------------------------------------------------------ launcher input validation
+
+    @Test
+    void invalidContextPathsAreRejected() {
+        for (String path : new String[] { "/..", "/a/../b", "/.", "app", "/app/", "//app", "/a\b", "/a b",
+                "/%2e%2e" }) {
+            assertThrows(IllegalArgumentException.class, () -> SecureTomcat.builder().context(path, ctx -> {
+            }), path);
+        }
+        SecureTomcat.builder().context("", ctx -> {
+        }).context("/", ctx -> {
+        }).context("/app", ctx -> {
+        }).context("/api/v1", ctx -> {
+        }).context("/my-app_2.0", ctx -> {
+        });
+    }
+
+    @Test
+    void workDirectoryCleanupDoesNotFollowSymlinks() throws Exception {
+        java.nio.file.Path outside = java.nio.file.Files.createTempDirectory("outside-");
+        java.nio.file.Path keep = java.nio.file.Files.writeString(outside.resolve("keep.txt"), "keep");
+        java.nio.file.Path baseDir = java.nio.file.Files.createTempDirectory("tomcat-secure-test-");
+        try {
+            java.nio.file.Path link = baseDir.resolve("link");
+            try {
+                java.nio.file.Files.createSymbolicLink(link, outside);
+            } catch (UnsupportedOperationException | IOException | SecurityException e) {
+                // Creating symbolic links needs extra privileges on Windows: use a directory junction instead,
+                // which any user can create and which Java does not report as a symbolic link
+                if (!System.getProperty("os.name").startsWith("Windows")) {
+                    org.junit.jupiter.api.Assumptions.abort("symbolic links not available: " + e);
+                }
+                Process p = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), outside.toString())
+                        .redirectErrorStream(true).start();
+                p.getInputStream().readAllBytes();
+                assertEquals(0, p.waitFor());
+            }
+            assertTrue(java.nio.file.Files.exists(link.resolve("keep.txt")), "link must point outside");
+            java.lang.reflect.Method delete = SecureTomcat.class.getDeclaredMethod("deleteRecursively",
+                    java.io.File.class);
+            delete.setAccessible(true);
+            delete.invoke(null, baseDir.toFile());
+            assertTrue(java.nio.file.Files.exists(keep));
+            assertFalse(java.nio.file.Files.exists(baseDir));
+        } finally {
+            java.nio.file.Files.deleteIfExists(keep);
+            java.nio.file.Files.deleteIfExists(outside);
+        }
     }
 }

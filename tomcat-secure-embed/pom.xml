@@ -89,4 +89,37 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      SAST: mvn -Psast verify
+      SpotBugs + FindSecBugs on the project owned code (org.tamacat.*). Any finding fails the build.
+      Full scan including the Tomcat sources (report only): mvn -DskipTests package spotbugs:spotbugs
+    -->
+    <profile>
+      <id>sast</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-maven-plugin</artifactId>
+            <configuration>
+              <onlyAnalyze>org.tamacat.-</onlyAnalyze>
+              <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+              <failOnError>true</failOnError>
+            </configuration>
+            <executions>
+              <execution>
+                <id>sast-own-code</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

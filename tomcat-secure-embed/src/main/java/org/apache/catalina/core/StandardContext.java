@@ -118,8 +118,6 @@ import org.apache.tomcat.util.descriptor.web.ApplicationParameter;
 import org.apache.tomcat.util.descriptor.web.ErrorPage;
 import org.apache.tomcat.util.descriptor.web.FilterDef;
 import org.apache.tomcat.util.descriptor.web.FilterMap;
-import org.apache.tomcat.util.descriptor.web.Injectable;
-import org.apache.tomcat.util.descriptor.web.InjectionTarget;
 import org.apache.tomcat.util.descriptor.web.LoginConfig;
 import org.apache.tomcat.util.descriptor.web.MessageDestination;
 import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
@@ -4576,48 +4574,7 @@ public class StandardContext extends ContainerBase implements Context, Notificat
     @Override
     public InstanceManager createInstanceManager() {
         // Hardened build: no JNDI environment, so no resource injection
-        javax.naming.Context context = null;
-        Map<String,Map<String,String>> injectionMap =
-                buildInjectionMap(getIgnoreAnnotations() ? new NamingResourcesImpl() : getNamingResources());
-        return new DefaultInstanceManager(context, injectionMap, this, this.getClass().getClassLoader());
-    }
-
-    private Map<String,Map<String,String>> buildInjectionMap(NamingResourcesImpl namingResources) {
-        Map<String,Map<String,String>> injectionMap = new HashMap<>();
-        for (Injectable resource : namingResources.findLocalEjbs()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findEjbs()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findEnvironments()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findMessageDestinationRefs()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findResourceEnvRefs()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findResources()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        for (Injectable resource : namingResources.findServices()) {
-            addInjectionTarget(resource, injectionMap);
-        }
-        return injectionMap;
-    }
-
-    private void addInjectionTarget(Injectable resource, Map<String,Map<String,String>> injectionMap) {
-        List<InjectionTarget> injectionTargets = resource.getInjectionTargets();
-        if (injectionTargets != null && !injectionTargets.isEmpty()) {
-            String jndiName = resource.getName();
-            for (InjectionTarget injectionTarget : injectionTargets) {
-                String clazz = injectionTarget.getTargetClass();
-                injectionMap.computeIfAbsent(clazz, k -> new HashMap<>()).put(injectionTarget.getTargetName(),
-                        jndiName);
-            }
-        }
+        return new DefaultInstanceManager(this, this.getClass().getClassLoader());
     }
 
 

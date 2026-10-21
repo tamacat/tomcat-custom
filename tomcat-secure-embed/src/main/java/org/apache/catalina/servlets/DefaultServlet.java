@@ -17,8 +17,6 @@
 package org.apache.catalina.servlets;
 
 import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
@@ -33,25 +31,15 @@ import java.io.Reader;
 import java.io.Serial;
 import java.io.Serializable;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.List;
-import java.util.Locale;
 import java.util.TreeSet;
 import java.util.function.Function;
-
-import javax.xml.transform.Source;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerException;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.transform.stream.StreamSource;
 
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.RequestDispatcher;
@@ -71,19 +59,15 @@ import org.apache.catalina.WebResource;
 import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.connector.RequestFacade;
 import org.apache.catalina.connector.ResponseFacade;
-import org.apache.catalina.util.IOTools;
-import org.apache.catalina.util.ServerInfo;
 import org.apache.catalina.util.URLEncoder;
 import org.apache.catalina.webresources.CachedResource;
 import org.apache.tomcat.util.buf.B2CConverter;
-import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.Method;
 import org.apache.tomcat.util.http.ResponseUtil;
 import org.apache.tomcat.util.http.parser.ContentRange;
 import org.apache.tomcat.util.http.parser.EntityTag;
 import org.apache.tomcat.util.http.parser.Ranges;
 import org.apache.tomcat.util.res.StringManager;
-import org.apache.tomcat.util.security.Escape;
 
 
 /**
@@ -177,11 +161,6 @@ public class DefaultServlet extends HttpServlet {
     protected int input = 2048;
 
     /**
-     * Should we generate directory listings?
-     */
-    protected boolean listings = false;
-
-    /**
      * Status code to use for directory redirects.
      */
     protected int directoryRedirectStatusCode = HttpServletResponse.SC_FOUND;
@@ -201,26 +180,6 @@ public class DefaultServlet extends HttpServlet {
      * The output buffer size to use when serving resources.
      */
     protected int output = 2048;
-
-    /**
-     * Allow customized directory listing per directory.
-     */
-    protected String localXsltFile = null;
-
-    /**
-     * Allow customized directory listing per context.
-     */
-    protected String contextXsltFile = null;
-
-    /**
-     * Allow customized directory listing per instance.
-     */
-    protected String globalXsltFile = null;
-
-    /**
-     * Allow a readme file to be included.
-     */
-    protected String readmeFile = null;
 
     /**
      * The complete set of web application resources
@@ -252,21 +211,6 @@ public class DefaultServlet extends HttpServlet {
      */
     @Deprecated
     protected boolean useAcceptRanges = true;
-
-    /**
-     * Flag to determine if server information is presented.
-     */
-    protected boolean showServerInfo = false;
-
-    /**
-     * Flag to determine if resources should be sorted.
-     */
-    protected boolean sortListings = false;
-
-    /**
-     * The sorting manager for sorting files and directories.
-     */
-    protected transient SortManager sortManager;
 
     /**
      * Flag that indicates whether partial PUTs are permitted.
@@ -309,7 +253,10 @@ public class DefaultServlet extends HttpServlet {
             output = Integer.parseInt(getServletConfig().getInitParameter("output"));
         }
 
-        listings = Boolean.parseBoolean(getServletConfig().getInitParameter("listings"));
+        if (Boolean.parseBoolean(getServletConfig().getInitParameter("listings"))) {
+            // Hardened build: directory listings have been removed
+            throw new UnavailableException(sm.getString("defaultServlet.listingsNotSupported"));
+        }
 
         if (getServletConfig().getInitParameter("directoryRedirectStatusCode") != null) {
             String statusCodeString = getServletConfig().getInitParameter("directoryRedirectStatusCode");
@@ -370,11 +317,6 @@ public class DefaultServlet extends HttpServlet {
             }
         }
 
-        globalXsltFile = getServletConfig().getInitParameter("globalXsltFile");
-        contextXsltFile = getServletConfig().getInitParameter("contextXsltFile");
-        localXsltFile = getServletConfig().getInitParameter("localXsltFile");
-        readmeFile = getServletConfig().getInitParameter("readmeFile");
-
         if (getServletConfig().getInitParameter("useAcceptRanges") != null) {
             useAcceptRanges = Boolean.parseBoolean(getServletConfig().getInitParameter("useAcceptRanges"));
         }
@@ -398,25 +340,6 @@ public class DefaultServlet extends HttpServlet {
             throw new UnavailableException(sm.getString("defaultServlet.noResources"));
         }
 
-        if (getServletConfig().getInitParameter("showServerInfo") != null) {
-            showServerInfo = Boolean.parseBoolean(getServletConfig().getInitParameter("showServerInfo"));
-        }
-
-        if (getServletConfig().getInitParameter("sortListings") != null) {
-            sortListings = Boolean.parseBoolean(getServletConfig().getInitParameter("sortListings"));
-
-            if (sortListings) {
-                boolean sortDirectoriesFirst;
-                if (getServletConfig().getInitParameter("sortDirectoriesFirst") != null) {
-                    sortDirectoriesFirst =
-                            Boolean.parseBoolean(getServletConfig().getInitParameter("sortDirectoriesFirst"));
-                } else {
-                    sortDirectoriesFirst = false;
-                }
-
-                sortManager = new SortManager(sortDirectoriesFirst);
-            }
-        }
 
         if (getServletConfig().getInitParameter("allowPartialPut") != null) {
             allowPartialPut = Boolean.parseBoolean(getServletConfig().getInitParameter("allowPartialPut"));
@@ -505,29 +428,6 @@ public class DefaultServlet extends HttpServlet {
         }
 
         return result.toString();
-    }
-
-
-    /**
-     * Determines the appropriate path to prepend resources with when generating directory listings. Depending on the
-     * behaviour of {@link #getRelativePath(HttpServletRequest)} this will change.
-     *
-     * @param request the request to determine the path for
-     *
-     * @return the prefix to apply to all resources in the listing.
-     */
-    protected String getPathPrefix(final HttpServletRequest request) {
-        return request.getContextPath();
-    }
-
-
-    /**
-     * Check if directory listings are enabled.
-     *
-     * @return true if directory listings are enabled
-     */
-    protected boolean isListings() {
-        return listings;
     }
 
 
@@ -1017,14 +917,10 @@ public class DefaultServlet extends HttpServlet {
                 return;
             }
 
-            // Skip directory listings if we have been configured to
-            // suppress them
-            if (!isListings()) {
-                response.sendError(HttpServletResponse.SC_NOT_FOUND,
-                        sm.getString("defaultServlet.missingResource", request.getRequestURI()));
-                return;
-            }
-            contentType = "text/html;charset=UTF-8";
+            // Hardened build: directory listings have been removed
+            response.sendError(HttpServletResponse.SC_NOT_FOUND,
+                    sm.getString("defaultServlet.missingResource", request.getRequestURI()));
+            return;
         } else {
             if (!isError) {
                 if (useAcceptRanges) {
@@ -1143,73 +1039,65 @@ public class DefaultServlet extends HttpServlet {
                 if (ostream == null) {
                     // Output via a writer so can't use sendfile or write
                     // content directly.
-                    if (resource.isDirectory()) {
-                        renderResult = render(request, getPathPrefix(request), resource, inputEncoding);
-                    } else {
-                        renderResult = resource.getInputStream();
-                        if (included) {
-                            // Need to make sure any BOM is removed
-                            if (!renderResult.markSupported()) {
-                                renderResult = new BufferedInputStream(renderResult);
-                            }
-                            Charset bomCharset = processBom(renderResult, useBomIfPresent.stripBom);
-                            if (bomCharset != null && useBomIfPresent.useBomEncoding) {
-                                inputEncoding = bomCharset.name();
-                            }
+                    renderResult = resource.getInputStream();
+                    if (included) {
+                        // Need to make sure any BOM is removed
+                        if (!renderResult.markSupported()) {
+                            renderResult = new BufferedInputStream(renderResult);
+                        }
+                        Charset bomCharset = processBom(renderResult, useBomIfPresent.stripBom);
+                        if (bomCharset != null && useBomIfPresent.useBomEncoding) {
+                            inputEncoding = bomCharset.name();
                         }
                     }
                     copy(renderResult, writer, inputEncoding);
                 } else {
                     // Output is via an OutputStream
-                    if (resource.isDirectory()) {
-                        renderResult = render(request, getPathPrefix(request), resource, inputEncoding);
-                    } else {
-                        // Output is content of resource
-                        // Check to see if conversion is required
-                        if (conversionRequired || included) {
-                            // When including a file, we need to check for a BOM
-                            // to determine if a conversion is required, so we
-                            // might as well always convert
-                            InputStream source = resource.getInputStream();
-                            if (!source.markSupported()) {
-                                source = new BufferedInputStream(source);
-                            }
-                            Charset bomCharset = processBom(source, useBomIfPresent.stripBom);
-                            if (bomCharset != null && useBomIfPresent.useBomEncoding) {
-                                inputEncoding = bomCharset.name();
-                            }
-                            // Following test also ensures included resources
-                            // are converted if an explicit output encoding was
-                            // specified
-                            if (outputEncodingSpecified) {
-                                OutputStreamWriter osw = new OutputStreamWriter(ostream, charset);
-                                PrintWriter pw = new PrintWriter(osw);
-                                copy(source, pw, inputEncoding);
-                                pw.flush();
-                            } else {
-                                // Just included but no conversion
-                                renderResult = source;
-                            }
+                    // Output is content of resource
+                    // Check to see if conversion is required
+                    if (conversionRequired || included) {
+                        // When including a file, we need to check for a BOM
+                        // to determine if a conversion is required, so we
+                        // might as well always convert
+                        InputStream source = resource.getInputStream();
+                        if (!source.markSupported()) {
+                            source = new BufferedInputStream(source);
+                        }
+                        Charset bomCharset = processBom(source, useBomIfPresent.stripBom);
+                        if (bomCharset != null && useBomIfPresent.useBomEncoding) {
+                            inputEncoding = bomCharset.name();
+                        }
+                        // Following test also ensures included resources
+                        // are converted if an explicit output encoding was
+                        // specified
+                        if (outputEncodingSpecified) {
+                            OutputStreamWriter osw = new OutputStreamWriter(ostream, charset);
+                            PrintWriter pw = new PrintWriter(osw);
+                            copy(source, pw, inputEncoding);
+                            pw.flush();
                         } else {
-                            if (!checkSendfile(request, response, resource, contentLength, null)) {
-                                // sendfile not possible so check if resource
-                                // content is available directly via
-                                // CachedResource. Do not want to call
-                                // getContent() on other resource
-                                // implementations as that could trigger loading
-                                // the contents of a very large file into memory
-                                byte[] resourceBody = null;
-                                if (resource instanceof CachedResource) {
-                                    resourceBody = resource.getContent();
-                                }
-                                if (resourceBody == null) {
-                                    // Resource content not directly available,
-                                    // use InputStream
-                                    renderResult = resource.getInputStream();
-                                } else {
-                                    // Use the resource content directly
-                                    ostream.write(resourceBody);
-                                }
+                            // Just included but no conversion
+                            renderResult = source;
+                        }
+                    } else {
+                        if (!checkSendfile(request, response, resource, contentLength, null)) {
+                            // sendfile not possible so check if resource
+                            // content is available directly via
+                            // CachedResource. Do not want to call
+                            // getContent() on other resource
+                            // implementations as that could trigger loading
+                            // the contents of a very large file into memory
+                            byte[] resourceBody = null;
+                            if (resource instanceof CachedResource) {
+                                resourceBody = resource.getContent();
+                            }
+                            if (resourceBody == null) {
+                                // Resource content not directly available,
+                                // use InputStream
+                                renderResult = resource.getInputStream();
+                            } else {
+                                // Use the resource content directly
+                                ostream.write(resourceBody);
                             }
                         }
                     }
@@ -1683,529 +1571,6 @@ public class DefaultServlet extends HttpServlet {
         }
 
         return ranges;
-    }
-
-
-    /**
-     * Decide which way to render. HTML or XML.
-     *
-     * @param request     The HttpServletRequest being served
-     * @param contextPath The path
-     * @param resource    The resource
-     * @param encoding    The encoding to use to process the readme (if any)
-     *
-     * @return the input stream with the rendered output
-     *
-     * @throws IOException      an IO error occurred
-     * @throws ServletException rendering error
-     */
-    protected InputStream render(HttpServletRequest request, String contextPath, WebResource resource, String encoding)
-            throws IOException, ServletException {
-
-        Source xsltSource = findXsltSource(resource);
-
-        if (xsltSource == null) {
-            return renderHtml(request, contextPath, resource, encoding);
-        }
-        return renderXml(request, contextPath, resource, xsltSource, encoding);
-    }
-
-
-    /**
-     * Return an InputStream to an XML representation of the contents this directory.
-     *
-     * @param request     The HttpServletRequest being served
-     * @param contextPath Context path to which our internal paths are relative
-     * @param resource    The associated resource
-     * @param xsltSource  The XSL stylesheet
-     * @param encoding    The encoding to use to process the readme (if any)
-     *
-     * @return the XML data
-     *
-     * @throws IOException      an IO error occurred
-     * @throws ServletException rendering error
-     */
-    protected InputStream renderXml(HttpServletRequest request, String contextPath, WebResource resource,
-            Source xsltSource, String encoding) throws IOException, ServletException {
-
-        StringBuilder sb = new StringBuilder();
-
-        sb.append("<?xml version=\"1.0\"?>");
-        sb.append("<listing ");
-        sb.append(" contextPath='");
-        sb.append(Escape.xml(contextPath));
-        sb.append('\'');
-        sb.append(" directory='");
-        sb.append(Escape.xml(resource.getName()));
-        sb.append("' ");
-        sb.append(" hasParent='").append(!resource.getName().equals("/"));
-        sb.append("'>");
-
-        sb.append("<entries>");
-
-        String[] entries = resources.list(resource.getWebappPath());
-
-        // rewriteUrl(contextPath) is expensive. cache result for later reuse
-        String rewrittenContextPath = rewriteUrl(contextPath);
-        String directoryWebappPath = resource.getWebappPath();
-
-        for (String entry : entries) {
-
-            if (entry.equalsIgnoreCase("WEB-INF") || entry.equalsIgnoreCase("META-INF") ||
-                    entry.equalsIgnoreCase(localXsltFile)) {
-                continue;
-            }
-
-            if ((directoryWebappPath + entry).equals(contextXsltFile)) {
-                continue;
-            }
-
-            WebResource childResource = resources.getResource(directoryWebappPath + entry);
-            if (!childResource.exists()) {
-                continue;
-            }
-
-            sb.append("<entry");
-            sb.append(" type='").append(childResource.isDirectory() ? "dir" : "file").append('\'');
-            sb.append(" urlPath='").append(Escape.xml(rewrittenContextPath))
-                    .append(Escape.xml(rewriteUrl(directoryWebappPath + entry)))
-                    .append(childResource.isDirectory() ? "/" : "").append('\'');
-            if (childResource.isFile()) {
-                sb.append(" size='").append(renderSize(childResource.getContentLength())).append('\'');
-            }
-            sb.append(" date='").append(childResource.getLastModifiedHttp()).append('\'');
-            sb.append(" longDate='").append(childResource.getLastModified()).append('\'');
-
-            sb.append('>');
-            sb.append(Escape.xml(entry));
-            if (childResource.isDirectory()) {
-                sb.append('/');
-            }
-            sb.append("</entry>");
-        }
-        sb.append("</entries>");
-
-        String readme = getReadme(resource, encoding);
-
-        if (readme != null) {
-            sb.append("<readme><![CDATA[");
-            sb.append(readme);
-            sb.append("]]></readme>");
-        }
-
-        sb.append("</listing>");
-
-        // Prevent possible memory leak. Ensure Transformer and
-        // TransformerFactory are not loaded from the web application.
-        Thread currentThread = Thread.currentThread();
-        ClassLoader original = currentThread.getContextClassLoader();
-        try {
-            currentThread.setContextClassLoader(DefaultServlet.class.getClassLoader());
-
-            TransformerFactory tFactory = TransformerFactory.newInstance();
-            Source xmlSource = new StreamSource(new StringReader(sb.toString()));
-            Transformer transformer = tFactory.newTransformer(xsltSource);
-
-            ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            OutputStreamWriter osWriter = new OutputStreamWriter(stream, StandardCharsets.UTF_8);
-            StreamResult out = new StreamResult(osWriter);
-            transformer.transform(xmlSource, out);
-            osWriter.flush();
-            return new ByteArrayInputStream(stream.toByteArray());
-        } catch (TransformerException e) {
-            throw new ServletException(sm.getString("defaultServlet.xslError"), e);
-        } finally {
-            currentThread.setContextClassLoader(original);
-        }
-    }
-
-    /**
-     * Return an InputStream to an HTML representation of the contents of this directory.
-     *
-     * @param request     The HttpServletRequest being served
-     * @param contextPath Context path to which our internal paths are relative
-     * @param resource    The associated resource
-     * @param encoding    The encoding to use to process the readme (if any)
-     *
-     * @return the HTML data
-     *
-     * @throws IOException an IO error occurred
-     */
-    protected InputStream renderHtml(HttpServletRequest request, String contextPath, WebResource resource,
-            String encoding) throws IOException {
-
-        // Prepare a writer to a buffered area
-        ByteArrayOutputStream stream = new ByteArrayOutputStream();
-        OutputStreamWriter osWriter = new OutputStreamWriter(stream, StandardCharsets.UTF_8);
-        PrintWriter writer = new PrintWriter(osWriter);
-
-        StringBuilder sb = new StringBuilder();
-
-        // Get the right strings
-        StringManager sm = StringManager.getManager(DefaultServlet.class.getPackageName(), request.getLocales());
-
-        String directoryWebappPath = resource.getWebappPath();
-        String escapedDirectoryWebappPath = Escape.htmlElementContent(directoryWebappPath);
-        WebResource[] entries = resources.listResources(directoryWebappPath);
-
-        // rewriteUrl(contextPath) is expensive. cache result for later reuse
-        String rewrittenContextPath = rewriteUrl(contextPath);
-
-        // Render the page header
-        sb.append("<!doctype html>\r\n");
-        sb.append("<html lang=\"").append(sm.getLocale().getLanguage()).append("\">\r\n");
-        sb.append("<head>\r\n");
-        sb.append("<title>");
-        sb.append(sm.getString("defaultServlet.directory.title", escapedDirectoryWebappPath));
-        sb.append("</title>\r\n");
-        sb.append("<style>");
-        sb.append(org.apache.catalina.util.TomcatCSS.TOMCAT_CSS);
-        sb.append("</style>\r\n");
-        sb.append("</head>\r\n");
-        sb.append("<body>\r\n");
-        sb.append("<h1>");
-        sb.append(sm.getString("defaultServlet.directory.title", escapedDirectoryWebappPath));
-
-        // Render the link to our parent (if required)
-        String parentDirectory = directoryWebappPath;
-        if (parentDirectory.endsWith("/")) {
-            parentDirectory = parentDirectory.substring(0, parentDirectory.length() - 1);
-        }
-        int slash = parentDirectory.lastIndexOf('/');
-        if (slash >= 0) {
-            String parent = directoryWebappPath.substring(0, slash);
-            sb.append(" \u2013 <a href=\"");
-            sb.append(rewrittenContextPath);
-            if (parent.isEmpty()) {
-                parent = "/";
-            }
-            sb.append(rewriteUrl(parent));
-            if (!parent.endsWith("/")) {
-                sb.append('/');
-            }
-            sb.append("\">");
-            sb.append("<b>");
-            sb.append(sm.getString("defaultServlet.directory.parent", Escape.htmlElementContent(parent)));
-            sb.append("</b>");
-            sb.append("</a>");
-        }
-
-        sb.append("</h1>\r\n");
-        sb.append("<hr class=\"line\">\r\n");
-
-        sb.append("<table width=\"100%\" cellspacing=\"0\"" + " cellpadding=\"5\" align=\"center\">\r\n");
-
-        SortManager.Order order;
-        if (sortListings) {
-            order = sortManager.getOrder(request.getQueryString());
-        } else {
-            order = null;
-        }
-        // Render the column headings
-        sb.append("<thead>\r\n");
-        sb.append("<tr>\r\n");
-        sb.append("<th align=\"left\"><font size=\"+1\"><strong>");
-        if (order != null) {
-            sb.append("<a href=\"?C=N;O=");
-            sb.append(getOrderChar(order, 'N'));
-            sb.append("\">");
-            sb.append(sm.getString("defaultServlet.resource.name"));
-            sb.append("</a>");
-        } else {
-            sb.append(sm.getString("defaultServlet.resource.name"));
-        }
-        sb.append("</strong></font></th>\r\n");
-        sb.append("<th align=\"center\"><font size=\"+1\"><strong>");
-        if (order != null) {
-            sb.append("<a href=\"?C=S;O=");
-            sb.append(getOrderChar(order, 'S'));
-            sb.append("\">");
-            sb.append(sm.getString("defaultServlet.resource.size"));
-            sb.append("</a>");
-        } else {
-            sb.append(sm.getString("defaultServlet.resource.size"));
-        }
-        sb.append("</strong></font></th>\r\n");
-        sb.append("<th align=\"right\"><font size=\"+1\"><strong>");
-        if (order != null) {
-            sb.append("<a href=\"?C=M;O=");
-            sb.append(getOrderChar(order, 'M'));
-            sb.append("\">");
-            sb.append(sm.getString("defaultServlet.resource.lastModified"));
-            sb.append("</a>");
-        } else {
-            sb.append(sm.getString("defaultServlet.resource.lastModified"));
-        }
-        sb.append("</strong></font></th>\r\n");
-        sb.append("</tr>\r\n");
-        sb.append("</thead>\r\n");
-
-        if (null != sortManager) {
-            sortManager.sort(entries, request.getQueryString());
-        }
-
-        boolean shade = false;
-        sb.append("<tbody>\r\n");
-        for (WebResource childResource : entries) {
-            String filename = childResource.getName();
-            if (filename.equalsIgnoreCase("WEB-INF") || filename.equalsIgnoreCase("META-INF")) {
-                continue;
-            }
-
-            if (!childResource.exists()) {
-                continue;
-            }
-
-            sb.append("<tr");
-            if (shade) {
-                sb.append(" bgcolor=\"#eeeeee\"");
-            }
-            sb.append(">\r\n");
-            shade = !shade;
-
-            sb.append("<td align=\"left\">&nbsp;&nbsp;\r\n");
-            sb.append("<a href=\"");
-            sb.append(rewrittenContextPath);
-            sb.append(rewriteUrl(childResource.getWebappPath()));
-            if (childResource.isDirectory()) {
-                sb.append('/');
-            }
-            sb.append("\"><tt>");
-            sb.append(Escape.htmlElementContent(filename));
-            if (childResource.isDirectory()) {
-                sb.append('/');
-            }
-            sb.append("</tt></a></td>\r\n");
-
-            sb.append("<td align=\"right\"><tt>");
-            if (childResource.isDirectory()) {
-                sb.append("&nbsp;");
-            } else {
-                sb.append(renderSize(childResource.getContentLength()));
-            }
-            sb.append("</tt></td>\r\n");
-
-            sb.append("<td align=\"right\"><tt>");
-            sb.append(renderTimestamp(childResource.getLastModified()));
-            sb.append("</tt></td>\r\n");
-
-            sb.append("</tr>\r\n");
-        }
-        sb.append("</tbody>\r\n");
-
-        // Render the page footer
-        sb.append("</table>\r\n");
-
-        sb.append("<hr class=\"line\">\r\n");
-
-        String readme = getReadme(resource, encoding);
-        if (readme != null) {
-            sb.append(readme);
-            sb.append("<hr class=\"line\">\r\n");
-        }
-
-        if (showServerInfo) {
-            sb.append("<h3>").append(ServerInfo.getServerInfo()).append("</h3>\r\n");
-        }
-        sb.append("</body>\r\n");
-        sb.append("</html>\r\n");
-
-        // Return an input stream to the underlying bytes
-        writer.write(sb.toString());
-        writer.flush();
-        return new ByteArrayInputStream(stream.toByteArray());
-
-    }
-
-
-    /**
-     * Render the specified file size (in bytes).
-     *
-     * @param size File size (in bytes)
-     *
-     * @return the formatted size
-     */
-    protected String renderSize(long size) {
-
-        long leftSide = size / 1024;
-        long rightSide = (size % 1024) / 103; // Makes 1 digit
-        if ((leftSide == 0) && (rightSide == 0) && (size > 0)) {
-            rightSide = 1;
-        }
-
-        return (String.valueOf(leftSide) + "." + String.valueOf(rightSide) + " KiB");
-
-    }
-
-
-    /**
-     * Render the specified file timestamp.
-     *
-     * @param timestamp File timestamp
-     *
-     * @return the formatted timestamp
-     */
-    protected String renderTimestamp(long timestamp) {
-
-        return FastHttpDateFormat.formatDate(timestamp);
-
-    }
-
-
-    /**
-     * Get the readme file as a string.
-     *
-     * @param directory The directory to search
-     * @param encoding  The readme encoding
-     *
-     * @return the readme for the specified directory
-     */
-    protected String getReadme(WebResource directory, String encoding) {
-
-        if (readmeFile != null) {
-            WebResource resource = resources.getResource(directory.getWebappPath() + readmeFile);
-            if (resource.isFile()) {
-                StringWriter buffer = new StringWriter();
-                InputStreamReader reader = null;
-                try (InputStream is = resource.getInputStream()) {
-                    if (encoding != null) {
-                        reader = new InputStreamReader(is, encoding);
-                    } else {
-                        reader = new InputStreamReader(is);
-                    }
-                    IOException e = copyNoThrow(reader, new PrintWriter(buffer));
-                    if (debug > 10) {
-                        log("readme '" + readmeFile + "' output error: " + ((e != null) ? e.getMessage() : ""));
-                    }
-                } catch (IOException ioe) {
-                    log(sm.getString("defaultServlet.readerCloseFailed"), ioe);
-                } finally {
-                    if (reader != null) {
-                        try {
-                            reader.close();
-                        } catch (IOException ignore) {
-                            // Ignore
-                        }
-                    }
-                }
-                return buffer.toString();
-            } else {
-                if (debug > 10) {
-                    log("readme '" + readmeFile + "' not found");
-                }
-
-                return null;
-            }
-        }
-
-        return null;
-    }
-
-
-    /**
-     * Return a Source for the xsl template (if possible).
-     *
-     * @param directory The directory to search
-     *
-     * @return the source for the specified directory
-     *
-     * @throws IOException an IO error occurred
-     */
-    protected Source findXsltSource(WebResource directory) throws IOException {
-
-        if (localXsltFile != null) {
-            WebResource resource = resources.getResource(directory.getWebappPath() + localXsltFile);
-            if (resource.isFile()) {
-                InputStream is = resource.getInputStream();
-                if (is != null) {
-                    return new StreamSource(is);
-                }
-            }
-            if (debug > 10) {
-                log("localXsltFile '" + localXsltFile + "' not found");
-            }
-        }
-
-        if (contextXsltFile != null) {
-            InputStream is = getServletContext().getResourceAsStream(contextXsltFile);
-            if (is != null) {
-                return new StreamSource(is);
-            }
-
-            if (debug > 10) {
-                log("contextXsltFile '" + contextXsltFile + "' not found");
-            }
-        }
-
-        /*
-         * Open and read in file in one fell swoop to reduce the chance of leaving handle open.
-         */
-        if (globalXsltFile != null) {
-            File f = validateGlobalXsltFile();
-            if (f != null) {
-                long globalXsltFileSize = f.length();
-                if (globalXsltFileSize > Integer.MAX_VALUE) {
-                    log(sm.getString("defaultServlet.globalXSLTTooBig", f.getAbsolutePath()));
-                } else {
-                    try (FileInputStream fis = new FileInputStream(f)) {
-                        int xsltLength = (int) globalXsltFileSize;
-                        byte[] b = new byte[xsltLength];
-                        if (xsltLength != IOTools.readFully(fis, b)) {
-                            log(sm.getString("defaultServlet.truncatedXSLT", f.getAbsolutePath()));
-                            return null;
-                        }
-                        return new StreamSource(new ByteArrayInputStream(b));
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-
-    private File validateGlobalXsltFile() {
-        Context context = resources.getContext();
-
-        File baseConf = new File(context.getCatalinaBase(), "conf");
-        File result = validateGlobalXsltFile(baseConf);
-        if (result == null) {
-            File homeConf = new File(context.getCatalinaHome(), "conf");
-            if (!baseConf.equals(homeConf)) {
-                result = validateGlobalXsltFile(homeConf);
-            }
-        }
-
-        return result;
-    }
-
-
-    private File validateGlobalXsltFile(File base) {
-        File candidate = new File(globalXsltFile);
-        if (!candidate.isAbsolute()) {
-            candidate = new File(base, globalXsltFile);
-        }
-
-        if (!candidate.isFile()) {
-            return null;
-        }
-
-        // First check that the resulting path is under the provided base
-        try {
-            if (!candidate.getCanonicalFile().toPath().startsWith(base.getCanonicalFile().toPath())) {
-                return null;
-            }
-        } catch (IOException ioe) {
-            return null;
-        }
-
-        // Next check that an .xsl or .xslt file has been specified
-        String nameLower = candidate.getName().toLowerCase(Locale.ENGLISH);
-        if (!nameLower.endsWith(".xslt") && !nameLower.endsWith(".xsl")) {
-            return null;
-        }
-
-        return candidate;
     }
 
 
@@ -2888,272 +2253,6 @@ public class DefaultServlet extends HttpServlet {
 
 
     private record PrecompressedResource(WebResource resource, CompressionFormat format) {
-    }
-
-
-    /**
-     * Gets the ordering character to be used for a particular column.
-     *
-     * @param order  The order that is currently being applied
-     * @param column The column that will be rendered.
-     *
-     * @return Either 'A' or 'D', to indicate "ascending" or "descending" sort order.
-     */
-    private char getOrderChar(SortManager.Order order, char column) {
-        if (column == order.column) {
-            if (order.ascending) {
-                return 'D';
-            } else {
-                return 'A';
-            }
-        } else {
-            return 'D';
-        }
-    }
-
-
-    /**
-     * A class encapsulating the sorting of resources.
-     */
-    protected static class SortManager {
-        /**
-         * The default sort.
-         */
-        protected Comparator<WebResource> defaultResourceComparator;
-
-        /**
-         * Comparator to use when sorting resources by name.
-         */
-        protected Comparator<WebResource> resourceNameComparator;
-
-        /**
-         * Comparator to use when sorting files by name, ascending (reverse).
-         */
-        protected Comparator<WebResource> resourceNameComparatorAsc;
-
-        /**
-         * Comparator to use when sorting resources by size.
-         */
-        protected Comparator<WebResource> resourceSizeComparator;
-
-        /**
-         * Comparator to use when sorting files by size, ascending (reverse).
-         */
-        protected Comparator<WebResource> resourceSizeComparatorAsc;
-
-        /**
-         * Comparator to use when sorting resources by last-modified date.
-         */
-        protected Comparator<WebResource> resourceLastModifiedComparator;
-
-        /**
-         * Comparator to use when sorting files by last-modified date, ascending (reverse).
-         */
-        protected Comparator<WebResource> resourceLastModifiedComparatorAsc;
-
-        SortManager(boolean directoriesFirst) {
-            resourceNameComparator = Comparator.comparing(WebResource::getName);
-            resourceNameComparatorAsc = resourceNameComparator.reversed();
-            resourceSizeComparator =
-                    Comparator.comparing(WebResource::getContentLength).thenComparing(resourceNameComparator);
-            resourceSizeComparatorAsc = resourceSizeComparator.reversed();
-            resourceLastModifiedComparator =
-                    Comparator.comparing(WebResource::getLastModified).thenComparing(resourceNameComparator);
-            resourceLastModifiedComparatorAsc = resourceLastModifiedComparator.reversed();
-
-            if (directoriesFirst) {
-                Comparator<WebResource> dirsFirst = comparingTrueFirst(WebResource::isDirectory);
-                resourceNameComparator = dirsFirst.thenComparing(resourceNameComparator);
-                resourceNameComparatorAsc = dirsFirst.thenComparing(resourceNameComparatorAsc);
-                resourceSizeComparator = dirsFirst.thenComparing(resourceSizeComparator);
-                resourceSizeComparatorAsc = dirsFirst.thenComparing(resourceSizeComparatorAsc);
-                resourceLastModifiedComparator = dirsFirst.thenComparing(resourceLastModifiedComparator);
-                resourceLastModifiedComparatorAsc = dirsFirst.thenComparing(resourceLastModifiedComparatorAsc);
-            }
-
-            defaultResourceComparator = resourceNameComparator;
-        }
-
-        /**
-         * Sorts an array of resources according to an ordering string.
-         *
-         * @param resources The array to sort.
-         * @param order     The ordering string.
-         *
-         * @see #getOrder(String)
-         */
-        public void sort(WebResource[] resources, String order) {
-            Comparator<WebResource> comparator = getComparator(order);
-
-            if (null != comparator) {
-                Arrays.sort(resources, comparator);
-            }
-        }
-
-        /**
-         * Get the comparator for the given order string.
-         *
-         * @param order The order string
-         * @return the comparator
-         */
-        public Comparator<WebResource> getComparator(String order) {
-            return getComparator(getOrder(order));
-        }
-
-        /**
-         * Get the comparator for the given order.
-         *
-         * @param order The order specification
-         * @return the comparator
-         */
-        public Comparator<WebResource> getComparator(Order order) {
-            if (null == order) {
-                return defaultResourceComparator;
-            }
-
-            if ('N' == order.column) {
-                if (order.ascending) {
-                    return resourceNameComparatorAsc;
-                } else {
-                    return resourceNameComparator;
-                }
-            }
-
-            if ('S' == order.column) {
-                if (order.ascending) {
-                    return resourceSizeComparatorAsc;
-                } else {
-                    return resourceSizeComparator;
-                }
-            }
-
-            if ('M' == order.column) {
-                if (order.ascending) {
-                    return resourceLastModifiedComparatorAsc;
-                } else {
-                    return resourceLastModifiedComparator;
-                }
-            }
-
-            return defaultResourceComparator;
-        }
-
-        /**
-         * Gets the Order to apply given an ordering-string. This ordering-string matches a subset of the
-         * ordering-strings supported by <a href="https://httpd.apache.org/docs/2.4/mod/mod_autoindex.html#query">Apache
-         * httpd</a>.
-         *
-         * @param order The ordering-string provided by the client.
-         *
-         * @return An Order specifying the column and ascending/descending to be applied to resources.
-         */
-        public Order getOrder(String order) {
-            if (null == order || order.trim().isEmpty()) {
-                return Order.DEFAULT;
-            }
-
-            String[] options = order.split(";");
-
-            if (0 == options.length) {
-                return Order.DEFAULT;
-            }
-
-            char column = '\0';
-            boolean ascending = false;
-
-            for (String option : options) {
-                option = option.trim();
-
-                if (2 < option.length()) {
-                    char opt = option.charAt(0);
-                    if ('C' == opt) {
-                        column = option.charAt(2);
-                    } else if ('O' == opt) {
-                        ascending = ('A' == option.charAt(2));
-                    }
-                }
-            }
-
-            if ('N' == column) {
-                if (ascending) {
-                    return Order.NAME_ASC;
-                } else {
-                    return Order.NAME;
-                }
-            }
-
-            if ('S' == column) {
-                if (ascending) {
-                    return Order.SIZE_ASC;
-                } else {
-                    return Order.SIZE;
-                }
-            }
-
-            if ('M' == column) {
-                if (ascending) {
-                    return Order.LAST_MODIFIED_ASC;
-                } else {
-                    return Order.LAST_MODIFIED;
-                }
-            }
-
-            return Order.DEFAULT;
-        }
-
-        /**
-         * Order specification for directory listing sorting.
-         */
-        public static class Order {
-            final char column;
-            final boolean ascending;
-
-            /**
-             * Create a new Order.
-             *
-             * @param column The column identifier
-             * @param ascending Whether to sort in ascending order
-             */
-            Order(char column, boolean ascending) {
-                this.column = column;
-                this.ascending = ascending;
-            }
-
-            /**
-             * Sort by name descending.
-             */
-            public static final Order NAME = new Order('N', false);
-
-            /**
-             * Sort by name ascending.
-             */
-            public static final Order NAME_ASC = new Order('N', true);
-
-            /**
-             * Sort by size descending.
-             */
-            public static final Order SIZE = new Order('S', false);
-
-            /**
-             * Sort by size ascending.
-             */
-            public static final Order SIZE_ASC = new Order('S', true);
-
-            /**
-             * Sort by last modified descending.
-             */
-            public static final Order LAST_MODIFIED = new Order('M', false);
-
-            /**
-             * Sort by last modified ascending.
-             */
-            public static final Order LAST_MODIFIED_ASC = new Order('M', true);
-
-            /**
-             * Default sort order (name descending).
-             */
-            public static final Order DEFAULT = NAME;
-        }
     }
 
 

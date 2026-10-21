@@ -8,6 +8,10 @@ MODULE="${1:-$ROOT/tomcat-secure-embed}"
 LIST="$ROOT/tools/removed-paths.txt"
 
 sed -e 's/#.*$//' -e 's/[[:space:]]*$//' "$LIST" | grep -v '^$' | while read -r path; do
+  # Only plain relative paths inside the source tree are allowed
+  case "$path" in
+    /*|*..*|*'\'*) echo "Refusing unsafe path in $LIST: $path" >&2; exit 1 ;;
+  esac
   for base in "$MODULE/src/main/java" "$MODULE/src/main/resources"; do
     if [ -e "$base/$path" ]; then
       rm -rf "${base:?}/$path"

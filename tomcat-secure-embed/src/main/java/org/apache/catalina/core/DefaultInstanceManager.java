@@ -19,12 +19,10 @@ package org.apache.catalina.core;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.annotation.Annotation;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +34,6 @@ import javax.naming.NamingException;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import jakarta.annotation.Resource;
 
 import org.apache.catalina.ContainerServlet;
 import org.apache.catalina.util.Introspection;
@@ -47,8 +44,9 @@ import org.apache.tomcat.util.collections.ManagedConcurrentWeakHashMap;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
- * Default implementation of {@link InstanceManager} that handles annotation-based
- * dependency injection ({@code @Resource}, {@code @PostConstruct}, {@code @PreDestroy}).
+ * Default implementation of {@link InstanceManager} that handles the {@code @PostConstruct} / {@code @PreDestroy}
+ * lifecycle callbacks (annotations or deployment descriptor). Hardened build: JNDI has been removed so there is no
+ * resource injection, and the lifecycle callbacks are always invoked.
  */
 public class DefaultInstanceManager implements InstanceManager {
 
@@ -59,16 +57,6 @@ public class DefaultInstanceManager implements InstanceManager {
      * The string manager for this package.
      */
     protected static final StringManager sm = StringManager.getManager(DefaultInstanceManager.class);
-
-    /**
-     * The context associated with this instance manager.
-     */
-    private final Context context;
-
-    /**
-     * The injection map for JNDI resource lookups.
-     */
-    private final Map<String,Map<String,String>> injectionMap;
 
     /**
      * The class loader for loading application classes.
@@ -103,13 +91,10 @@ public class DefaultInstanceManager implements InstanceManager {
     /**
      * Create a new DefaultInstanceManager.
      *
-     * @param context The context associated with this instance manager
-     * @param injectionMap The injection map for JNDI resource lookups
      * @param catalinaContext The Catalina context for configuration
      * @param containerClassLoader The container class loader
      */
-    public DefaultInstanceManager(Context context, Map<String,Map<String,String>> injectionMap,
-            org.apache.catalina.Context catalinaContext, ClassLoader containerClassLoader) {
+    public DefaultInstanceManager(org.apache.catalina.Context catalinaContext, ClassLoader containerClassLoader) {
         classLoader = catalinaContext.getLoader().getClassLoader();
         privileged = catalinaContext.getPrivileged();
         this.containerClassLoader = containerClassLoader;
@@ -124,8 +109,6 @@ public class DefaultInstanceManager implements InstanceManager {
         loadProperties(classNames, "org/apache/catalina/core/RestrictedFilters.properties",
                 "defaultInstanceManager.restrictedFiltersResource", log);
         restrictedClasses = Collections.unmodifiableSet(classNames);
-        this.context = context;
-        this.injectionMap = injectionMap;
         this.postConstructMethods = catalinaContext.findPostConstructMethods();
         this.preDestroyMethods = catalinaContext.findPreDestroyMethods();
     }
@@ -160,25 +143,10 @@ public class DefaultInstanceManager implements InstanceManager {
     private Object newInstance(Object instance, Class<?> clazz)
             throws IllegalAccessException, InvocationTargetException, NamingException {
         if (!ignoreAnnotations) {
-            Map<String,String> injections = assembleInjectionsFromClassHierarchy(clazz);
-            populateAnnotationsCache(clazz, injections);
-            processAnnotations(instance, injections);
+            populateAnnotationsCache(clazz);
             postConstruct(instance, clazz);
         }
         return instance;
-    }
-
-    private Map<String,String> assembleInjectionsFromClassHierarchy(Class<?> clazz) {
-        Map<String,String> injections = new HashMap<>();
-        Map<String,String> currentInjections;
-        while (clazz != null) {
-            currentInjections = this.injectionMap.get(clazz.getName());
-            if (currentInjections != null) {
-                injections.putAll(currentInjections);
-            }
-            clazz = clazz.getSuperclass();
-        }
-        return injections;
     }
 
     @Override
@@ -199,11 +167,6 @@ public class DefaultInstanceManager implements InstanceManager {
      */
     protected void postConstruct(Object instance, final Class<?> clazz)
             throws IllegalAccessException, InvocationTargetException {
-        if (context == null) {
-            // No resource injection
-            return;
-        }
-
         Class<?> superClass = clazz.getSuperclass();
         if (superClass != Object.class) {
             postConstruct(instance, superClass);
@@ -271,17 +234,10 @@ public class DefaultInstanceManager implements InstanceManager {
      * Make sure that the annotations cache has been populated for the provided class.
      *
      * @param clazz      clazz to populate annotations for
-     * @param injections map of injections for this class from xml deployment descriptor
-     *
-     * @throws IllegalAccessException                      if injection target is inaccessible
-     * @throws javax.naming.NamingException                if value cannot be looked up in jndi
-     * @throws java.lang.reflect.InvocationTargetException if injection fails
      */
-    protected void populateAnnotationsCache(Class<?> clazz, Map<String,String> injections)
-            throws IllegalAccessException, InvocationTargetException, NamingException {
+    protected void populateAnnotationsCache(Class<?> clazz) {
 
         List<AnnotationCacheEntry> annotations = null;
-        Set<String> injectionsMatchedToSetter = new HashSet<>();
 
         while (clazz != null) {
             AnnotationCacheEntry[] annotationsArray = annotationCache.get(clazz);
@@ -299,25 +255,6 @@ public class DefaultInstanceManager implements InstanceManager {
                 Method preDestroy = null;
                 String preDestroyFromXml = preDestroyMethods.get(clazz.getName());
                 for (Method method : methods) {
-                    if (context != null) {
-                        // Resource injection only if JNDI is enabled
-                        if (injections != null && Introspection.isValidSetter(method)) {
-                            String fieldName = Introspection.getPropertyName(method);
-                            injectionsMatchedToSetter.add(fieldName);
-                            if (injections.containsKey(fieldName)) {
-                                annotations.add(new AnnotationCacheEntry(method.getName(), method.getParameterTypes(),
-                                        injections.get(fieldName), AnnotationCacheEntryType.SETTER));
-                                continue;
-                            }
-                        }
-                        if (!metadataComplete) {
-                            Resource resourceAnnotation;
-                            if ((resourceAnnotation = method.getAnnotation(Resource.class)) != null) {
-                                annotations.add(new AnnotationCacheEntry(method.getName(), method.getParameterTypes(),
-                                        resourceAnnotation.name(), AnnotationCacheEntryType.SETTER));
-                            }
-                        }
-                    }
 
                     postConstruct = findPostConstruct(postConstruct, postConstructFromXml, method);
 
@@ -339,25 +276,6 @@ public class DefaultInstanceManager implements InstanceManager {
                             preDestroyFromXml, clazz.getName()));
                 }
 
-                if (context != null) {
-                    // Initialize fields annotations for resource injection if
-                    // JNDI is enabled
-                    Field[] fields = clazz.getDeclaredFields();
-                    for (Field field : fields) {
-                        Resource resourceAnnotation;
-                        String fieldName = field.getName();
-                        if (injections != null && injections.containsKey(fieldName) &&
-                                !injectionsMatchedToSetter.contains(fieldName)) {
-                            annotations.add(new AnnotationCacheEntry(fieldName, null, injections.get(fieldName),
-                                    AnnotationCacheEntryType.FIELD));
-                        } else if (!metadataComplete) {
-                            if ((resourceAnnotation = field.getAnnotation(Resource.class)) != null) {
-                                annotations.add(new AnnotationCacheEntry(fieldName, null, resourceAnnotation.name(),
-                                        AnnotationCacheEntryType.FIELD));
-                            }
-                        }
-                    }
-                }
 
                 if (annotations.isEmpty()) {
                     // Use common object to save memory
@@ -367,40 +285,6 @@ public class DefaultInstanceManager implements InstanceManager {
                 }
                 synchronized (annotationCache) {
                     annotationCache.put(clazz, annotationsArray);
-                }
-            }
-            clazz = clazz.getSuperclass();
-        }
-    }
-
-
-    /**
-     * Inject resources in specified instance.
-     *
-     * @param instance   instance to inject into
-     * @param injections map of injections for this class from xml deployment descriptor
-     *
-     * @throws IllegalAccessException                      if injection target is inaccessible
-     * @throws javax.naming.NamingException                if value cannot be looked up in jndi
-     * @throws java.lang.reflect.InvocationTargetException if injection fails
-     */
-    protected void processAnnotations(Object instance, Map<String,String> injections)
-            throws IllegalAccessException, InvocationTargetException, NamingException {
-
-        if (context == null) {
-            // No resource injection
-            return;
-        }
-
-        Class<?> clazz = instance.getClass();
-
-        while (clazz != null) {
-            AnnotationCacheEntry[] annotations = annotationCache.get(clazz);
-            for (AnnotationCacheEntry entry : annotations) {
-                if (entry.type() == AnnotationCacheEntryType.SETTER) {
-                    lookupMethodResource(context, instance, getMethod(clazz, entry), entry.name(), clazz);
-                } else if (entry.type() == AnnotationCacheEntryType.FIELD) {
-                    lookupFieldResource(context, instance, getField(clazz, entry), entry.name(), clazz);
                 }
             }
             clazz = clazz.getSuperclass();
@@ -471,75 +355,6 @@ public class DefaultInstanceManager implements InstanceManager {
         }
     }
 
-    /**
-     * Inject resources in specified field.
-     *
-     * @param context  jndi context to extract value from
-     * @param instance object to inject into
-     * @param field    field target for injection
-     * @param name     jndi name value is bound under
-     * @param clazz    class annotation is defined in
-     *
-     * @throws IllegalAccessException       if field is inaccessible
-     * @throws javax.naming.NamingException if value is not accessible in naming context
-     */
-    protected static void lookupFieldResource(Context context, Object instance, Field field, String name,
-            Class<?> clazz) throws NamingException, IllegalAccessException {
-
-        Object lookedupResource;
-
-        String normalizedName = normalize(name);
-
-        if ((normalizedName != null) && (!normalizedName.isEmpty())) {
-            lookedupResource = context.lookup(normalizedName);
-        } else {
-            lookedupResource = context.lookup(clazz.getName() + "/" + field.getName());
-        }
-
-        // This will always be a new Field instance
-        // Making this instance accessible does not affect other instances
-        // If this doesn't work, just let set() fail
-        field.trySetAccessible();
-        field.set(instance, lookedupResource);
-    }
-
-    /**
-     * Inject resources in specified method.
-     *
-     * @param context  jndi context to extract value from
-     * @param instance object to inject into
-     * @param method   field target for injection
-     * @param name     jndi name value is bound under
-     * @param clazz    class annotation is defined in
-     *
-     * @throws IllegalAccessException                      if method is inaccessible
-     * @throws javax.naming.NamingException                if value is not accessible in naming context
-     * @throws java.lang.reflect.InvocationTargetException if setter call fails
-     */
-    protected static void lookupMethodResource(Context context, Object instance, Method method, String name,
-            Class<?> clazz) throws NamingException, IllegalAccessException, InvocationTargetException {
-
-        if (!Introspection.isValidSetter(method)) {
-            throw new IllegalArgumentException(sm.getString("defaultInstanceManager.invalidInjection"));
-        }
-
-        Object lookedupResource;
-
-        String normalizedName = normalize(name);
-
-        if ((normalizedName != null) && (!normalizedName.isEmpty())) {
-            lookedupResource = context.lookup(normalizedName);
-        } else {
-            lookedupResource = context.lookup(clazz.getName() + "/" + Introspection.getPropertyName(method));
-        }
-
-        // This will always be a new Method instance
-        // Making this instance accessible does not affect other instances
-        // If this doesn't work, just let invoke() fail
-        method.trySetAccessible();
-        method.invoke(instance, lookedupResource);
-    }
-
     private static void loadProperties(Set<String> classNames, String resourceName, String messageKey, Log log) {
         Properties properties = new Properties();
         ClassLoader cl = DefaultInstanceManager.class.getClassLoader();
@@ -577,16 +392,6 @@ public class DefaultInstanceManager implements InstanceManager {
         try {
             result = clazz.getDeclaredMethod(entry.accessibleObjectName(), entry.paramTypes());
         } catch (NoSuchMethodException e) {
-            // Should never happen. On that basis don't log it.
-        }
-        return result;
-    }
-
-    private static Field getField(final Class<?> clazz, final AnnotationCacheEntry entry) {
-        Field result = null;
-        try {
-            result = clazz.getDeclaredField(entry.accessibleObjectName());
-        } catch (NoSuchFieldException e) {
             // Should never happen. On that basis don't log it.
         }
         return result;
@@ -630,8 +435,6 @@ public class DefaultInstanceManager implements InstanceManager {
 
 
     private enum AnnotationCacheEntryType {
-        FIELD,
-        SETTER,
         POST_CONSTRUCT,
         PRE_DESTROY
     }

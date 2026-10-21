@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reviewed, intentional findings in project owned code (org.tamacat.*). -->
+<FindBugsFilter>
+  <!-- getTomcat() deliberately exposes the underlying Tomcat for advanced customization (documented) -->
+  <Match>
+    <Class name="org.tamacat.tomcat.SecureTomcat"/>
+    <Method name="getTomcat"/>
+    <Bug pattern="EI_EXPOSE_REP"/>
+  </Match>
+  <!-- Command line entry point: any startup failure should terminate the JVM with the exception -->
+  <Match>
+    <Class name="org.tamacat.tomcat.SecureTomcat"/>
+    <Method name="main"/>
+    <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION"/>
+  </Match>
+</FindBugsFilter>

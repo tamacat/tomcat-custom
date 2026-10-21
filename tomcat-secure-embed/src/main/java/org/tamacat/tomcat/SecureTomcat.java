@@ -18,7 +18,9 @@ package org.tamacat.tomcat;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -62,7 +64,8 @@ import org.apache.tomcat.util.modeler.Registry;
  * </ul>
  * TLS is expected to be terminated by a reverse proxy / load balancer in front of this server. Use
  * {@link Builder#behindTlsProxy(boolean)} so that the application sees {@code https} / {@code isSecure()} and the
- * session cookie gets the {@code Secure} attribute.
+ * session cookie gets the {@code Secure} attribute. In that mode every request is treated as secure, so the server
+ * must only be reachable through the proxy (bind it to a loopback / private address).
  *
  * <pre>
  * SecureTomcat server = SecureTomcat.builder()
@@ -297,14 +300,28 @@ public final class SecureTomcat implements AutoCloseable {
 
 
     private static void deleteRecursively(File file) {
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
+        // Never follow links: only recurse into real directories. Symbolic links and other reparse points (e.g.
+        // Windows junctions, which are not reported as symbolic links) are deleted themselves, not their targets.
+        if (isRealDirectory(file.toPath())) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
             }
         }
         if (!file.delete() && file.exists()) {
             file.deleteOnExit();
+        }
+    }
+
+    private static boolean isRealDirectory(Path path) {
+        try {
+            BasicFileAttributes attrs =
+                    Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            return attrs.isDirectory() && !attrs.isSymbolicLink() && !attrs.isOther();
+        } catch (IOException e) {
+            return false;
         }
     }
 
@@ -531,8 +548,19 @@ public final class SecureTomcat implements AutoCloseable {
             if (contextPath.equals("/")) {
                 return "";
             }
-            if (!contextPath.isEmpty() && (!contextPath.startsWith("/") || contextPath.endsWith("/"))) {
+            if (contextPath.isEmpty()) {
+                return contextPath;
+            }
+            if (!contextPath.startsWith("/") || contextPath.endsWith("/")) {
                 throw new IllegalArgumentException("Invalid context path [" + contextPath + "]");
+            }
+            // Each segment: non-empty, not "." / "..", only unreserved URI characters. This also keeps the
+            // document base derived from the context path inside the work directory.
+            for (String segment : contextPath.substring(1).split("/", -1)) {
+                if (segment.isEmpty() || segment.equals(".") || segment.equals("..") ||
+                        !segment.matches("[A-Za-z0-9._~-]+")) {
+                    throw new IllegalArgumentException("Invalid context path [" + contextPath + "]");
+                }
             }
             return contextPath;
         }

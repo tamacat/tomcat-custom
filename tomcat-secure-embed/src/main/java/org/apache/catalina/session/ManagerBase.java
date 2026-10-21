@@ -200,11 +200,6 @@ public abstract class ManagerBase extends LifecycleMBeanBase implements Manager 
 
     private boolean notifyAttributeListenerOnUnchangedValue = true;
 
-    /**
-     * Determines whether sessions managed by this manager shall persist (serialize) authentication information or not.
-     */
-    private boolean persistAuthentication = false;
-
     private boolean sessionActivityCheck = Globals.STRICT_SERVLET_COMPLIANCE;
 
     private boolean sessionLastAccessAtStart = Globals.STRICT_SERVLET_COMPLIANCE;
@@ -563,27 +558,6 @@ public abstract class ManagerBase extends LifecycleMBeanBase implements Manager 
         support.firePropertyChange("processExpiresFrequency", Integer.valueOf(oldProcessExpiresFrequency),
                 Integer.valueOf(this.processExpiresFrequency));
 
-    }
-
-
-    /**
-     * Return whether sessions managed by this manager shall persist authentication information or not.
-     *
-     * @return {@code true}, sessions managed by this manager shall persist authentication information; {@code false}
-     *             otherwise
-     */
-    public boolean getPersistAuthentication() {
-        return this.persistAuthentication;
-    }
-
-    /**
-     * Set whether sessions managed by this manager shall persist authentication information or not.
-     *
-     * @param persistAuthentication if {@code true}, sessions managed by this manager shall persist authentication
-     *                                  information
-     */
-    public void setPersistAuthentication(boolean persistAuthentication) {
-        this.persistAuthentication = persistAuthentication;
     }
 
 

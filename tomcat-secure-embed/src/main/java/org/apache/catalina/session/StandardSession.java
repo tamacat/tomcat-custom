@@ -17,22 +17,18 @@
 package org.apache.catalina.session;
 
 import java.beans.PropertyChangeSupport;
-import java.io.IOException;
 import java.io.InvalidObjectException;
 import java.io.NotSerializableException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.ObjectStreamException;
 import java.io.Serial;
 import java.io.Serializable;
-import java.io.WriteAbortedException;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -804,37 +800,6 @@ public class StandardSession implements HttpSession, Session, Serializable {
     // ------------------------------------------------ Session Package Methods
 
 
-    /**
-     * Read a serialized version of the contents of this session object from the specified object input stream, without
-     * requiring that the StandardSession itself have been serialized.
-     *
-     * @param stream The object input stream to read from
-     *
-     * @exception ClassNotFoundException if an unknown class is specified
-     * @exception IOException            if an input/output error occurs
-     */
-    public void readObjectData(ObjectInputStream stream) throws ClassNotFoundException, IOException {
-
-        doReadObject(stream);
-
-    }
-
-
-    /**
-     * Write a serialized version of the contents of this session object to the specified object output stream, without
-     * requiring that the StandardSession itself have been serialized.
-     *
-     * @param stream The object output stream to write to
-     *
-     * @exception IOException if an input/output error occurs
-     */
-    public void writeObjectData(ObjectOutputStream stream) throws IOException {
-
-        doWriteObject(stream);
-
-    }
-
-
     // ------------------------------------------------- HttpSession Properties
 
 
@@ -1116,6 +1081,33 @@ public class StandardSession implements HttpSession, Session, Serializable {
     }
 
     /**
+     * Hardened build: session persistence has been removed, so sessions are never deserialized. Rejecting
+     * deserialization here also prevents this class being reconstructed by any other path (defence in depth).
+     *
+     * @param stream Ignored
+     *
+     * @throws InvalidObjectException always
+     */
+    @Serial
+    private void readObject(ObjectInputStream stream) throws InvalidObjectException {
+        throw new InvalidObjectException(sm.getString("standardSession.serializationNotSupported"));
+    }
+
+
+    /**
+     * Hardened build: session persistence has been removed, so sessions are never serialized.
+     *
+     * @param stream Ignored
+     *
+     * @throws NotSerializableException always
+     */
+    @Serial
+    private void writeObject(ObjectOutputStream stream) throws NotSerializableException {
+        throw new NotSerializableException(sm.getString("standardSession.serializationNotSupported"));
+    }
+
+
+    /**
      * {@inheritDoc}
      * <p>
      * This implementation simply checks the value for serializability. Subclasses might use other distribution
@@ -1126,218 +1118,6 @@ public class StandardSession implements HttpSession, Session, Serializable {
         return value instanceof Serializable;
     }
 
-
-    /**
-     * Read a serialized version of this session object from the specified object input stream.
-     * <p>
-     * <b>IMPLEMENTATION NOTE</b>: The reference to the owning Manager is not restored by this method, and must be set
-     * explicitly.
-     *
-     * @param stream The input stream to read from
-     *
-     * @exception ClassNotFoundException if an unknown class is specified
-     * @exception IOException            if an input/output error occurs
-     */
-    protected void doReadObject(ObjectInputStream stream) throws ClassNotFoundException, IOException {
-
-        // Deserialize the scalar instance variables (except Manager)
-        authType = null; // Transient (may be set later)
-        creationTime = ((Long) stream.readObject()).longValue();
-        lastAccessedTime = ((Long) stream.readObject()).longValue();
-        maxInactiveInterval = ((Integer) stream.readObject()).intValue();
-        isNew = ((Boolean) stream.readObject()).booleanValue();
-        isValid = ((Boolean) stream.readObject()).booleanValue();
-        thisAccessedTime = ((Long) stream.readObject()).longValue();
-        principal = null; // Transient (may be set later)
-        // setId((String) stream.readObject());
-        id = (String) stream.readObject();
-        if (manager.getContext().getLogger().isTraceEnabled()) {
-            manager.getContext().getLogger().trace("readObject() loading session " + id);
-        }
-
-        if (notes == null) {
-            notes = new ConcurrentHashMap<>();
-        }
-        /*
-         * The next object read could either be the number of attributes (Integer) or if authentication information is
-         * persisted then: - authType (String) - always present - Principal object - always present - expected session
-         * ID - present if BZ 66120 is fixed - saved request - present if BZ 66120 is fixed
-         *
-         * Note: Some, all or none of the above objects may be null
-         */
-        Object nextObject = stream.readObject();
-        if (!(nextObject instanceof Integer)) {
-            // Not an Integer so the next two objects will be authType and
-            // Principal
-            setAuthType((String) nextObject);
-            try {
-                setPrincipal((Principal) stream.readObject());
-            } catch (ClassNotFoundException | ObjectStreamException e) {
-                String msg = sm.getString("standardSession.principalNotDeserializable", id);
-                if (manager.getContext().getLogger().isDebugEnabled()) {
-                    manager.getContext().getLogger().debug(msg, e);
-                } else {
-                    manager.getContext().getLogger().warn(msg);
-                }
-                throw e;
-            }
-
-            nextObject = stream.readObject();
-            if (!(nextObject instanceof Integer)) {
-                // Not an Integer so the next two objects will be 'expected session ID' and 'saved request'. FORM
-                // authentication is not supported by this build so both are always written as null.
-                if (nextObject != null || stream.readObject() != null) {
-                    throw new InvalidObjectException(sm.getString("standardSession.authNotesNotSupported", id));
-                }
-
-                // Next object will be the number of attributes
-                nextObject = stream.readObject();
-            }
-        }
-
-        // Deserialize the attribute count and attribute values
-        if (attributes == null) {
-            attributes = new ConcurrentHashMap<>();
-        }
-        int n = ((Integer) nextObject).intValue();
-        boolean isValidSave = isValid;
-        isValid = true;
-        for (int i = 0; i < n; i++) {
-            String name = (String) stream.readObject();
-            final Object value;
-            try {
-                value = stream.readObject();
-            } catch (WriteAbortedException wae) {
-                if (wae.getCause() instanceof NotSerializableException) {
-                    String msg = sm.getString("standardSession.notDeserializable", name, id);
-                    if (manager.getContext().getLogger().isDebugEnabled()) {
-                        manager.getContext().getLogger().debug(msg, wae);
-                    } else {
-                        manager.getContext().getLogger().warn(msg);
-                    }
-                    // Skip non serializable attributes
-                    continue;
-                }
-                throw wae;
-            }
-            if (manager.getContext().getLogger().isTraceEnabled()) {
-                manager.getContext().getLogger().trace("  loading attribute '" + name + "' with value '" + value + "'");
-            }
-            // Handle the case where the filter configuration was changed while
-            // the web application was stopped.
-            if (exclude(name, value)) {
-                continue;
-            }
-            // ConcurrentHashMap does not allow null keys or values
-            if (null != value) {
-                attributes.put(name, value);
-            }
-        }
-        isValid = isValidSave;
-
-        if (listeners == null) {
-            listeners = new ArrayList<>();
-        }
-    }
-
-
-    /**
-     * Write a serialized version of this session object to the specified object output stream.
-     * <p>
-     * <b>IMPLEMENTATION NOTE</b>: The owning Manager will not be stored in the serialized representation of this
-     * Session. After calling <code>readObject()</code>, you must set the associated Manager explicitly.
-     * <p>
-     * <b>IMPLEMENTATION NOTE</b>: Any attribute that is not Serializable will be unbound from the session, with
-     * appropriate actions if it implements HttpSessionBindingListener. If you do not want any such attributes, be sure
-     * the <code>distributable</code> property of the associated Manager is set to <code>true</code>.
-     *
-     * @param stream The output stream to write to
-     *
-     * @exception IOException if an input/output error occurs
-     */
-    protected void doWriteObject(ObjectOutputStream stream) throws IOException {
-
-        // Write the scalar instance variables (except Manager)
-        stream.writeObject(Long.valueOf(creationTime));
-        stream.writeObject(Long.valueOf(lastAccessedTime));
-        stream.writeObject(Integer.valueOf(maxInactiveInterval));
-        stream.writeObject(Boolean.valueOf(isNew));
-        stream.writeObject(Boolean.valueOf(isValid));
-        stream.writeObject(Long.valueOf(thisAccessedTime));
-        stream.writeObject(id);
-        if (manager.getContext().getLogger().isTraceEnabled()) {
-            manager.getContext().getLogger().trace("writeObject() storing session " + id);
-        }
-
-        // Gather authentication information (if configured)
-        String sessionAuthType = null;
-        Principal sessionPrincipal = null;
-        if (getPersistAuthentication()) {
-            sessionAuthType = getAuthType();
-            sessionPrincipal = getPrincipal();
-            if (sessionPrincipal != null && !(sessionPrincipal instanceof Serializable)) {
-                sessionPrincipal = null;
-                manager.getContext().getLogger().warn(sm.getString("standardSession.principalNotSerializable", id));
-            }
-        }
-
-        // Write authentication information (may be null values)
-        stream.writeObject(sessionAuthType);
-        try {
-            stream.writeObject(sessionPrincipal);
-        } catch (NotSerializableException e) {
-            manager.getContext().getLogger().warn(sm.getString("standardSession.principalNotSerializable", id), e);
-        }
-        // Expected session ID and saved request (FORM authentication is not supported by this build)
-        stream.writeObject(null);
-        stream.writeObject(null);
-
-        // Accumulate the names of serializable and non-serializable attributes
-        String[] keys = keys();
-        List<String> saveNames = new ArrayList<>();
-        List<Object> saveValues = new ArrayList<>();
-        for (String key : keys) {
-            Object value = attributes.get(key);
-            if (value == null) {
-                // Continue
-            } else if (isAttributeDistributable(key, value) && !exclude(key, value)) {
-                saveNames.add(key);
-                saveValues.add(value);
-            } else {
-                removeAttributeInternal(key, true);
-            }
-        }
-
-        // Serialize the attribute count and the Serializable attributes
-        int n = saveNames.size();
-        stream.writeObject(Integer.valueOf(n));
-        for (int i = 0; i < n; i++) {
-            stream.writeObject(saveNames.get(i));
-            try {
-                stream.writeObject(saveValues.get(i));
-                if (manager.getContext().getLogger().isTraceEnabled()) {
-                    manager.getContext().getLogger().trace(
-                            "  storing attribute '" + saveNames.get(i) + "' with value '" + saveValues.get(i) + "'");
-                }
-            } catch (NotSerializableException e) {
-                manager.getContext().getLogger()
-                        .warn(sm.getString("standardSession.notSerializable", saveNames.get(i), id), e);
-            }
-        }
-
-    }
-
-    /**
-     * Return whether authentication information shall be persisted or not.
-     *
-     * @return {@code true}, if authentication information shall be persisted; {@code false} otherwise
-     */
-    private boolean getPersistAuthentication() {
-        if (manager instanceof ManagerBase) {
-            return ((ManagerBase) manager).getPersistAuthentication();
-        }
-        return false;
-    }
 
     /**
      * Should the given session attribute be excluded? This implementation checks:

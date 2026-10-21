@@ -1,6 +1,7 @@
 package org.tamacat.tomcat;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.HttpConstraint;
@@ -83,6 +84,27 @@ public final class TestServlets {
         @Override
         protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
             throw new IllegalStateException("secret-internal-detail");
+        }
+    }
+
+    public static class LifecycleCallbackServlet extends HttpServlet {
+        private static final long serialVersionUID = 1L;
+        static final AtomicInteger POST_CONSTRUCT = new AtomicInteger();
+        static final AtomicInteger PRE_DESTROY = new AtomicInteger();
+
+        @jakarta.annotation.PostConstruct
+        void postConstruct() {
+            POST_CONSTRUCT.incrementAndGet();
+        }
+
+        @jakarta.annotation.PreDestroy
+        void preDestroy() {
+            PRE_DESTROY.incrementAndGet();
+        }
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            resp.getWriter().print("postConstruct=" + POST_CONSTRUCT.get());
         }
     }
 
