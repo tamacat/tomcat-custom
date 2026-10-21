@@ -57,7 +57,16 @@ DataSource や設定値は JNDI ではなく、アプリケーション側（Spr
 
 ## 使い方
 
+成果物は tamacat の Maven リポジトリ（[tamacat/tamacat.github.io](https://github.com/tamacat/tamacat.github.io) の `mvn-repo` ブランチ）で公開しています。Java 17 以上が必要です。
+
 ```xml
+<repositories>
+  <repository>
+    <id>tamacat.org</id>
+    <url>https://raw.githubusercontent.com/tamacat/tamacat.github.io/mvn-repo/</url>
+  </repository>
+</repositories>
+
 <dependency>
   <groupId>org.tamacat</groupId>
   <artifactId>tomcat-secure-embed</artifactId>
@@ -132,12 +141,37 @@ mvn -Psast clean verify
 SpotBugs + FindSecBugs で自作コード（`org.tamacat.*`）を解析し、指摘が 1 件でもあればビルドを失敗させます。
 Tomcat 本体を含む全体スキャンの結果、上流からの削減効果、残存指摘の判断理由は [docs/security-review.md](docs/security-review.md) にまとめています。
 
+## リリース（mvn-repo への公開）
+
+`main` ブランチへの push で GitHub Actions（[publish-mvn-repo.yml](.github/workflows/publish-mvn-repo.yml)）が動きます。
+
+1. **検証:** JDK 17 で `mvn -Psast clean verify`（テスト + SAST）、JDK 25 でテスト。どちらもテスト 0 失敗・0 スキップが条件
+2. **公開:** 検証でビルドしたファイルそのもの（SHA-256 で照合）を `deploy-file` で `mvn-repo` に追加し、push。`release` 環境のレビュー承認が必要
+   - 公開済みのバージョンは上書きしません（警告を出してスキップ）。公開するには `pom.xml` のバージョンを上げてください（`11.0.27-1` → `11.0.27-2` など。親・子の両方）
+   - 変更は `org/tamacat/tomcat-secure-parent/` と `org/tamacat/tomcat-secure-embed/` の新バージョンと `maven-metadata.xml` に限定され、それ以外の変更・削除があれば失敗します
+   - `mvn-repo` は 1GB 超のため、必要なディレクトリだけを部分・スパースクローンします
+
+初回のみ、リポジトリの Settings → Environments で `release` 環境を作り、次を設定してください。
+
+- Required reviewers（承認者）と、Deployment branches を `main` に限定
+- シークレット `MVN_REPO_PAT`: `tamacat/tamacat.github.io` だけに Contents の read/write を許可した fine-grained トークン
+
+公開処理はローカルでも確認できます（commit / push はしません）。
+
+```bash
+mvn -Psast clean verify
+bash tools/collect-dist.sh target/dist
+git clone --depth 1 --filter=blob:none --sparse --branch mvn-repo https://github.com/tamacat/tamacat.github.io.git target/mvn-repo
+git -C target/mvn-repo sparse-checkout set org/tamacat/tomcat-secure-parent org/tamacat/tomcat-secure-embed
+bash tools/stage-mvn-repo.sh target/dist target/mvn-repo 11.0.27-1
+```
+
 ## Tomcat のバージョンアップ手順
 
 ```bash
 # 1. 新バージョンの公式ソースを取得（Maven Central、Apache Tomcat KEYS で GPG 署名検証）→ 削除 → パッチ適用
 bash tools/import-tomcat.sh 11.0.28
-# 2. pom.xml の tomcat.version / ecj.version / version を更新（ECJ は上流の tomcat-embed-jasper の pom に合わせる）
+# 2. pom.xml（親・子）の tomcat.version / ecj.version / version を更新（ECJ は上流の tomcat-embed-jasper の pom に合わせる。version は例: 11.0.28-1）
 # 3. ビルド・テスト。パッチが当たらない場合は手で修正後、差分を再生成
 mvn clean verify
 bash tools/make-patch.sh
