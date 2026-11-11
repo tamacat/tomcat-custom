@@ -37,7 +37,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 
@@ -64,6 +67,7 @@ import org.apache.catalina.webresources.CachedResource;
 import org.apache.tomcat.util.buf.B2CConverter;
 import org.apache.tomcat.util.http.Method;
 import org.apache.tomcat.util.http.ResponseUtil;
+import org.apache.tomcat.util.http.parser.AcceptEncoding;
 import org.apache.tomcat.util.http.parser.ContentRange;
 import org.apache.tomcat.util.http.parser.EntityTag;
 import org.apache.tomcat.util.http.parser.Ranges;
@@ -484,8 +488,16 @@ public class DefaultServlet extends HttpServlet {
      */
     @Override
     protected void doOptions(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-
         resp.setHeader("Allow", determineMethodsAllowed(req));
+    }
+
+
+    @Override
+    protected void doPatch(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        // Overridden so the correct Allow header can be returned
+        resp.setHeader("Allow", determineMethodsAllowed(req));
+        // Picks up HttpServlet's HTTP/1.0 handling
+        super.doPatch(req, resp);
     }
 
 
@@ -1380,49 +1392,61 @@ public class DefaultServlet extends HttpServlet {
     private PrecompressedResource getBestPrecompressedResource(HttpServletRequest request,
             List<PrecompressedResource> precompressedResources) {
         Enumeration<String> headers = request.getHeaders("Accept-Encoding");
+        List<AcceptEncoding> acceptEncodings = new ArrayList<>();
+        while (headers.hasMoreElements()) {
+            String header = headers.nextElement();
+            try {
+                acceptEncodings.addAll(AcceptEncoding.parse(new StringReader(header)));
+            } catch (IOException e) {
+                // StringReader should not throw IOException
+                log(sm.getString("defaultServlet.acceptEncoding.ioe", header));
+            }
+        }
         PrecompressedResource bestResource = null;
         double bestResourceQuality = 0;
         int bestResourcePreference = Integer.MAX_VALUE;
-        while (headers.hasMoreElements()) {
-            String header = headers.nextElement();
-            for (String preference : header.split(",")) {
-                double quality = 1;
-                int qualityIdx = preference.indexOf(';');
-                if (qualityIdx > 0) {
-                    int equalsIdx = preference.indexOf('=', qualityIdx + 1);
-                    if (equalsIdx == -1) {
-                        continue;
-                    }
-                    quality = Double.parseDouble(preference.substring(equalsIdx + 1).trim());
+
+        Set<String> excluded = new HashSet<>();
+        for (AcceptEncoding acceptEncoding : acceptEncodings) {
+            if (acceptEncoding.getQuality() == 0) {
+                excluded.add(acceptEncoding.getEncoding().toLowerCase(Locale.ENGLISH));
+            }
+        }
+        for (AcceptEncoding acceptEncoding : acceptEncodings) {
+            double quality = acceptEncoding.getQuality();
+            if (quality > 0 && quality >= bestResourceQuality) {
+                String encoding = acceptEncoding.getEncoding().toLowerCase(Locale.ENGLISH);
+                if (excluded.contains(encoding)) {
+                    continue;
                 }
-                if (quality >= bestResourceQuality) {
-                    String encoding = preference;
-                    if (qualityIdx > 0) {
-                        encoding = encoding.substring(0, qualityIdx);
-                    }
-                    encoding = encoding.trim();
-                    if ("identity".equals(encoding)) {
-                        bestResource = null;
-                        bestResourceQuality = quality;
-                        bestResourcePreference = Integer.MAX_VALUE;
-                        continue;
-                    }
-                    if ("*".equals(encoding)) {
-                        bestResource = precompressedResources.get(0);
-                        bestResourceQuality = quality;
-                        bestResourcePreference = 0;
-                        continue;
-                    }
+                if ("identity".equals(encoding)) {
+                    bestResource = null;
+                    bestResourceQuality = quality;
+                    bestResourcePreference = Integer.MAX_VALUE;
+                    continue;
+                }
+                if ("*".equals(encoding)) {
                     for (int i = 0; i < precompressedResources.size(); ++i) {
                         PrecompressedResource resource = precompressedResources.get(i);
-                        if (encoding.equals(resource.format.encoding)) {
-                            if (quality > bestResourceQuality || i < bestResourcePreference) {
-                                bestResource = resource;
-                                bestResourceQuality = quality;
-                                bestResourcePreference = i;
-                            }
-                            break;
+                        if (excluded.contains(resource.format.encoding.toLowerCase(Locale.ENGLISH))) {
+                            continue;
                         }
+                        bestResource = resource;
+                        bestResourceQuality = quality;
+                        bestResourcePreference = i;
+                        break;
+                    }
+                    continue;
+                }
+                for (int i = 0; i < precompressedResources.size(); ++i) {
+                    PrecompressedResource resource = precompressedResources.get(i);
+                    if (encoding.equalsIgnoreCase(resource.format.encoding)) {
+                        if (quality > bestResourceQuality || i < bestResourcePreference) {
+                            bestResource = resource;
+                            bestResourceQuality = quality;
+                            bestResourcePreference = i;
+                        }
+                        break;
                     }
                 }
             }

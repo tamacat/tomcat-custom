@@ -20,6 +20,7 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.io.Serial;
 
 import jakarta.el.ELContext;
 import jakarta.el.ELException;
@@ -34,6 +35,7 @@ import jakarta.el.VariableMapper;
 import org.apache.el.lang.EvaluationContext;
 import org.apache.el.lang.ExpressionBuilder;
 import org.apache.el.parser.Node;
+import org.apache.el.util.ExpressionUtils;
 import org.apache.el.util.ReflectionUtil;
 
 
@@ -66,6 +68,9 @@ import org.apache.el.util.ReflectionUtil;
  * @see jakarta.el.MethodExpression
  */
 public final class MethodExpressionImpl extends MethodExpression implements Externalizable {
+
+    @Serial
+    private static final long serialVersionUID = 7625836928626978145L;
 
     private Class<?> expectedType;
 
@@ -128,7 +133,15 @@ public final class MethodExpressionImpl extends MethodExpression implements Exte
      */
     @Override
     public boolean equals(Object obj) {
-        return (obj instanceof MethodExpressionImpl && obj.hashCode() == this.hashCode());
+        if (!(obj instanceof MethodExpressionImpl)) {
+            return false;
+        }
+        if (obj.hashCode() != this.hashCode()) {
+            return false;
+        }
+
+        MethodExpressionImpl other = (MethodExpressionImpl) obj;
+        return ExpressionUtils.equals(getNode(), fnMapper, other.getNode(), other.fnMapper);
     }
 
     /**
@@ -207,7 +220,7 @@ public final class MethodExpressionImpl extends MethodExpression implements Exte
      */
     @Override
     public int hashCode() {
-        return this.expr.hashCode();
+        return ExpressionUtils.hashCode(getNode(), fnMapper);
     }
 
     /**

@@ -1550,9 +1550,13 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                 return true;
             }
 
-            fillReadBuffer(false);
+            int nRead = fillReadBuffer(false);
 
-            return socketBufferHandler.getReadBuffer().position() > 0;
+            // A return of -1 signals the end of the input. Report that the
+            // socket is ready in that case since a subsequent read is able to
+            // report the end of the data to the reader immediately rather than
+            // waiting for data that will never arrive.
+            return nRead == -1 || socketBufferHandler.getReadBuffer().position() > 0;
         }
 
 
@@ -1689,7 +1693,7 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     synchronized (readLock) {
                         n = getSocket().read(buffer);
                         if (n == -1) {
-                            throw new EOFException();
+                            return -1;
                         } else if (n == 0) {
                             // Ensure a spurious wake-up doesn't trigger a duplicate registration
                             if (!readBlocking) {
@@ -1714,9 +1718,6 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                 } while (n == 0); // TLS needs to loop as reading zero application bytes is possible
             } else {
                 n = getSocket().read(buffer);
-                if (n == -1) {
-                    throw new EOFException();
-                }
             }
             return n;
         }
@@ -2171,8 +2172,17 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     getHandler().process(socketWrapper, SocketEvent.CONNECT_FAIL);
                     socketWrapper.close();
                 } else if (handshake == SelectionKey.OP_READ) {
+                    /*
+                     * The handshake reads from the channel directly so does not update the last read time. Time spent
+                     * processing the handshake (e.g. OCSP checks of the client certificate) must not count towards
+                     * the time spent waiting for the client else the Poller may time out the connection as soon as
+                     * read interest is registered.
+                     */
+                    ((NioSocketWrapper) socketWrapper).updateLastRead();
                     socketWrapper.registerReadInterest();
                 } else if (handshake == SelectionKey.OP_WRITE) {
+                    // Same as for read above
+                    ((NioSocketWrapper) socketWrapper).updateLastWrite();
                     socketWrapper.registerWriteInterest();
                 }
             } catch (CancelledKeyException cx) {
