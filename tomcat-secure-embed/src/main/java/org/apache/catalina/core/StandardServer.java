@@ -18,6 +18,7 @@ package org.apache.catalina.core;
 
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;

@@ -55,6 +55,11 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
     /** State machine for async processing. */
     protected final AsyncStateMachine asyncStateMachine;
     private volatile long asyncTimeout = -1;
+    /**
+     * Value for asyncTimeoutGeneration that marks a timeout as already processed, so that any event that is still
+     * queued for the generation it was dispatched for is treated as stale.
+     */
+    private static final long NO_TIMEOUT_GENERATION = -1;
     /*
      * Tracks the current async generation when a timeout is dispatched. In the time it takes for a container thread to
      * be allocated and the timeout processing to start, it is possible that the application completes this generation
@@ -338,23 +343,29 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
             // Extract the port information first, if any
             if (colonPos != -1) {
-                int port = 0;
-                for (int i = colonPos + 1; i < valueL; i++) {
-                    char c = (char) valueB[i + valueS];
-                    if (c < '0' || c > '9') {
-                        response.setStatus(400);
-                        setErrorState(ErrorState.CLOSE_CLEAN, null);
-                        return;
+                // A ':' not followed by digits is an empty port, which the
+                // grammar allows (RFC 3986, section 3.2.3). Treat it like an
+                // absent port: keep the port already associated with the
+                // request rather than storing zero for the absent digits.
+                if (colonPos + 1 < valueL) {
+                    int port = 0;
+                    for (int i = colonPos + 1; i < valueL; i++) {
+                        char c = (char) valueB[i + valueS];
+                        if (c < '0' || c > '9') {
+                            response.setStatus(400);
+                            setErrorState(ErrorState.CLOSE_CLEAN, null);
+                            return;
+                        }
+                        int digit = c - '0';
+                        if (port > (Integer.MAX_VALUE - digit) / 10) {
+                            response.setStatus(400);
+                            setErrorState(ErrorState.CLOSE_CLEAN, null);
+                            return;
+                        }
+                        port = port * 10 + digit;
                     }
-                    int digit = c - '0';
-                    if (port > (Integer.MAX_VALUE - digit) / 10) {
-                        response.setStatus(400);
-                        setErrorState(ErrorState.CLOSE_CLEAN, null);
-                        return;
-                    }
-                    port = port * 10 + digit;
+                    request.setServerPort(port);
                 }
-                request.setServerPort(port);
 
                 // Only need to copy the host name up to the :
                 valueL = colonPos;
@@ -601,6 +612,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
                 break;
             }
             case ASYNC_TIMEOUT: {
+                /*
+                 * The event has reached the processor, so the timeout no longer needs to be dispatched by the timeout
+                 * task. Mark the generation as handled so that any event that is already queued for this timeout is
+                 * treated as stale rather than delivered a second time.
+                 */
+                setAsyncTimeout(-1);
+                asyncTimeoutGeneration = NO_TIMEOUT_GENERATION;
                 AtomicBoolean result = (AtomicBoolean) param;
                 result.set(asyncStateMachine.asyncTimeout());
                 break;
@@ -725,8 +743,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 
     private void doTimeoutAsync() {
-        // Avoid multiple timeouts
-        setAsyncTimeout(-1);
+        /*
+         * The timeout is deliberately not cleared here. It is cleared when the event is processed, when the timeout
+         * task will stop dispatching it (see the ASYNC_TIMEOUT handling in action()). Clearing it here would mean that
+         * an event that is not processed - for example, because another thread was processing the socket when the
+         * event was dispatched, so the dispatch was skipped as stale - is never re-dispatched and the asynchronous
+         * request is left running without a timeout.
+         */
         asyncTimeoutGeneration = asyncStateMachine.getCurrentGeneration();
         processSocketEvent(SocketEvent.TIMEOUT, true);
     }

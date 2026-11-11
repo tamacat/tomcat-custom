@@ -52,6 +52,8 @@ public final class Out implements TagPlugin {
         String strDefName = ctxt.getTemporaryVariableName();
         String strEscapeXmlName = ctxt.getTemporaryVariableName();
         String strSkipBodyName = ctxt.getTemporaryVariableName();
+        String strBodyContentName = ctxt.getTemporaryVariableName();
+        String strBodyName = ctxt.getTemporaryVariableName();
 
         // the value attribute is not mandatory; the tag body is a fallback.
         ctxt.generateImport("java.io.Reader");
@@ -89,8 +91,35 @@ public final class Out implements TagPlugin {
         ctxt.generateJavaSource(
                 "boolean " + strSkipBodyName + " = " + "org.apache.jasper.tagplugins.jstl.core.Out.output(out, " +
                         strObjectName + ", " + strValName + ", " + strDefName + ", " + strEscapeXmlName + ");");
+        if (!ctxt.hasBody()) {
+            // There is no body to use as a fallback, so there is nothing to
+            // buffer. Avoid allocating a BodyContent for every null value.
+            return;
+        }
         ctxt.generateJavaSource("if(!" + strSkipBodyName + ") {");
+        // Neither the value nor the default produced output. As in the
+        // standard tag handler, capture the body content, then output it
+        // trimmed and escaped according to the escapeXml attribute. The
+        // capture is unwound in a finally block, so a failing body does
+        // not leave the output redirected, as the container does when a
+        // buffered tag body throws.
+        ctxt.generateJavaSource("jakarta.servlet.jsp.tagext.BodyContent " +
+                strBodyContentName + " = _jspx_page_context.pushBody();");
+        ctxt.generateJavaSource("out = " + strBodyContentName + ";");
+        ctxt.generateJavaSource("String " + strBodyName + ";");
+        ctxt.generateJavaSource("try {");
         ctxt.generateBody();
+        ctxt.generateJavaSource("} finally {");
+        ctxt.generateJavaSource("    " + strBodyName + " = " +
+                strBodyContentName + ".getString().trim();");
+        ctxt.generateJavaSource("    out = _jspx_page_context.popBody();");
+        ctxt.generateJavaSource("}");
+        ctxt.generateJavaSource("if(" + strEscapeXmlName + ") {");
+        ctxt.generateJavaSource("    out.write(org.apache.jasper.tagplugins.jstl.Util.escapeXml(" +
+                strBodyName + "));");
+        ctxt.generateJavaSource("} else {");
+        ctxt.generateJavaSource("    out.write(" + strBodyName + ");");
+        ctxt.generateJavaSource("}");
         ctxt.generateJavaSource("}");
     }
 

@@ -8,6 +8,13 @@
 #   tools/import-tomcat.sh <tomcat-version>                 # import into tomcat-secure-embed/ (overwrites Tomcat sources)
 #   tools/import-tomcat.sh <tomcat-version> <dir> --no-patch # pristine (removals only) import into <dir>, used by make-patch.sh
 #
+# TOMCAT_MAVEN_REPO overrides the Maven repository base URL (default: Maven Central). Use it to import a release
+# candidate from the Apache staging repository before it reaches Maven Central, for example:
+#   TOMCAT_MAVEN_REPO=https://repository.apache.org/content/repositories/orgapachetomcat-1612 \
+#     tools/import-tomcat.sh 11.0.29
+# Only https://repo.maven.apache.org/ and https://repository.apache.org/ are accepted. The GPG signatures are still
+# verified against the Apache Tomcat KEYS file.
+#
 # Files owned by this project are never touched:
 #   src/main/java/org/tamacat/**, src/main/resources/META-INF/**
 #
@@ -21,7 +28,12 @@ if [ "${3:-}" = "--no-patch" ]; then
   APPLY_PATCH=no
 fi
 
-MAVEN=https://repo.maven.apache.org/maven2/org/apache/tomcat
+MAVEN_REPO="${TOMCAT_MAVEN_REPO:-https://repo.maven.apache.org/maven2}"
+case "$MAVEN_REPO" in
+  https://repo.maven.apache.org/*|https://repository.apache.org/*) ;;
+  *) echo "Refusing untrusted TOMCAT_MAVEN_REPO: $MAVEN_REPO" >&2; exit 1 ;;
+esac
+MAVEN="${MAVEN_REPO%/}/org/apache/tomcat"
 KEYS_URL=https://downloads.apache.org/tomcat/tomcat-${VERSION%%.*}/KEYS
 ARTIFACTS="embed/tomcat-embed-core embed/tomcat-embed-el embed/tomcat-embed-jasper tomcat-annotations-api"
 

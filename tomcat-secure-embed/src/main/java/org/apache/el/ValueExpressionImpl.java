@@ -20,6 +20,7 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.io.Serial;
 
 import jakarta.el.ELContext;
 import jakarta.el.ELException;
@@ -34,6 +35,7 @@ import org.apache.el.lang.EvaluationContext;
 import org.apache.el.lang.ExpressionBuilder;
 import org.apache.el.parser.AstLiteralExpression;
 import org.apache.el.parser.Node;
+import org.apache.el.util.ExpressionUtils;
 import org.apache.el.util.ReflectionUtil;
 
 
@@ -73,6 +75,9 @@ import org.apache.el.util.ReflectionUtil;
  * @see jakarta.el.ValueExpression
  */
 public final class ValueExpressionImpl extends ValueExpression implements Externalizable {
+
+    @Serial
+    private static final long serialVersionUID = 1534424021831272939L;
 
     private Class<?> expectedType;
 
@@ -118,7 +123,8 @@ public final class ValueExpressionImpl extends ValueExpression implements Extern
             return false;
         }
 
-        return this.getNode().equals(((ValueExpressionImpl) obj).getNode());
+        ValueExpressionImpl other = (ValueExpressionImpl) obj;
+        return ExpressionUtils.equals(getNode(), fnMapper, other.getNode(), other.fnMapper);
     }
 
     /**
@@ -173,7 +179,7 @@ public final class ValueExpressionImpl extends ValueExpression implements Extern
 
     @Override
     public int hashCode() {
-        return this.getNode().hashCode();
+        return ExpressionUtils.hashCode(getNode(), fnMapper);
     }
 
     @Override

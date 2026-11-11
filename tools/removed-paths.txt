@@ -32,6 +32,8 @@ org/apache/tomcat/util/net/SSLUtilBase.java               # TLS
 org/apache/tomcat/util/net/SecureNioChannel.java          # TLS
 org/apache/tomcat/util/net/SecureNio2Channel.java         # TLS
 org/apache/tomcat/util/net/TLSClientHelloExtractor.java   # TLS
+org/apache/tomcat/util/net/SSLHostConfigPreSharedKey.java # TLS pre-shared keys (11.0.28+)
+org/apache/catalina/startup/PreSharedKeyCreateRule.java   # server.xml <PreSharedKey> (TLS, 11.0.28+)
 org/apache/catalina/core/AprLifecycleListener.java        # native APR
 org/apache/catalina/core/AprStatus.java                   # native APR
 org/apache/catalina/core/JniLifecycleListener.java        # native JNI
@@ -128,3 +130,4 @@ org/apache/catalina/mbeans/NamingResourcesMBean.java      # JMX creation of JNDI
 org/apache/catalina/mbeans/ContextEnvironmentMBean.java   # JMX JNDI environment entries
 org/apache/catalina/mbeans/ContextResourceMBean.java      # JMX JNDI resources
 org/apache/catalina/mbeans/ContextResourceLinkMBean.java  # JMX JNDI resource links
+org/apache/catalina/mbeans/BaseNamingResourceMBean.java   # base class of the JMX JNDI resource MBeans (11.0.28+)
