@@ -555,7 +555,8 @@ public abstract class SocketWrapperBase<E> {
      * @param off The offset in the array
      * @param len The number of bytes to read
      *
-     * @return the number of bytes read
+     * @return the number of bytes read, or -1 if the end of the input has been
+     *         reached
      *
      * @throws IOException If an I/O error occurs
      */
@@ -567,14 +568,17 @@ public abstract class SocketWrapperBase<E> {
      * @param block Whether to block
      * @param to The ByteBuffer to read into
      *
-     * @return the number of bytes read
+     * @return the number of bytes read, or -1 if the end of the input has been
+     *         reached
      *
      * @throws IOException If an I/O error occurs
      */
     public abstract int read(boolean block, ByteBuffer to) throws IOException;
 
     /**
-     * Checks if the socket is ready for reading.
+     * Checks if the socket is ready for reading. Note that this method may
+     * return {@code true} at the end of the input since, in that case, a
+     * subsequent read is able to report the end of the input immediately.
      *
      * @return {@code true} if data is available to read
      *
@@ -1676,14 +1680,22 @@ public abstract class SocketWrapperBase<E> {
                             timeoutMillis = (timeoutExpiry - System.nanoTime()) / 1_000_000;
                         }
                         if (state.state == CompletionState.PENDING) {
-                            if (handler != null && state.callHandler.compareAndSet(true, false)) {
-                                handler.failed(new SocketTimeoutException(getTimeoutMsg(read)), attachment);
+                            if (handler != null) {
+                                if (state.callHandler.compareAndSet(true, false)) {
+                                    handler.failed(new SocketTimeoutException(getTimeoutMsg(read)), attachment);
+                                } else {
+                                    awaitHandlerCompletion(state);
+                                }
                             }
                             return CompletionState.ERROR;
                         }
                     } catch (InterruptedException e) {
-                        if (handler != null && state.callHandler.compareAndSet(true, false)) {
-                            handler.failed(new SocketTimeoutException(getTimeoutMsg(read)), attachment);
+                        if (handler != null) {
+                            if (state.callHandler.compareAndSet(true, false)) {
+                                handler.failed(new SocketTimeoutException(getTimeoutMsg(read)), attachment);
+                            } else {
+                                awaitHandlerCompletion(state);
+                            }
                         }
                         return CompletionState.ERROR;
                     }
@@ -1691,6 +1703,26 @@ public abstract class SocketWrapperBase<E> {
             }
         }
         return state.state;
+    }
+
+
+    /**
+     * The completion thread has claimed the right to call the handler but has not yet finished doing so. Wait for it to
+     * finish (it updates the state and notifies once the handler has returned) so that the caller does not return
+     * before the handler has been called. The caller must hold the monitor for the state.
+     */
+    private void awaitHandlerCompletion(OperationState<?> state) {
+        boolean interrupted = false;
+        while (state.state == CompletionState.PENDING) {
+            try {
+                state.wait();
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
 

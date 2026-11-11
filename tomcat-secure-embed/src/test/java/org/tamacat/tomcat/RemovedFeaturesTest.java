@@ -55,6 +55,8 @@ class RemovedFeaturesTest {
             "org.apache.coyote.ajp.AjpNioProtocol",
             // TLS / OpenSSL / APR / NIO2
             "org.apache.tomcat.util.net.SSLHostConfig",
+            "org.apache.tomcat.util.net.SSLHostConfigPreSharedKey",
+            "org.apache.catalina.startup.PreSharedKeyCreateRule",
             "org.apache.tomcat.util.net.SecureNioChannel",
             "org.apache.tomcat.util.net.jsse.JSSEImplementation",
             "org.apache.tomcat.util.net.openssl.OpenSSLImplementation",
@@ -96,7 +98,8 @@ class RemovedFeaturesTest {
             "org.apache.naming.factory.BeanFactory",
             "org.apache.naming.factory.ResourceFactory",
             "org.apache.catalina.core.NamingContextListener",
-            "org.apache.catalina.mbeans.NamingResourcesMBean" })
+            "org.apache.catalina.mbeans.NamingResourcesMBean",
+            "org.apache.catalina.mbeans.BaseNamingResourceMBean" })
     void classIsAbsent(String className) {
         assertThrows(ClassNotFoundException.class, () -> Class.forName(className));
     }

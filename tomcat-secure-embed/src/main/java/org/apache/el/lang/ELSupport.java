@@ -26,6 +26,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -57,21 +58,19 @@ public class ELSupport {
      * If the objects are identical, or they are equal according to {@link #equals(ELContext, Object, Object)} then
      * return 0.
      * <p>
+     * If either object is null, error
+     * <p>
      * If either object is a BigDecimal, then coerce both to BigDecimal first. Similarly for Double(Float), BigInteger,
      * and Long(Integer, Char, Short, Byte).
      * <p>
-     * Otherwise, check that the first object is an instance of Comparable, and compare against the second object. If
-     * that is null, return 1, otherwise return the result of comparing against the second object.
+     * If either object is TemporalAccessor, Clock, java.util.Date or java.sql.Timestamp, coerce both to Instant and
+     * then compare.
      * <p>
-     * Similarly, if the second object is Comparable, if the first is null, return -1, else return the result of
-     * comparing against the first object.
+     * If the first object is an instance of Comparable, return the result of comparing against the second object.
      * <p>
-     * A null object is considered as:
-     * <ul>
-     * <li>ZERO when compared with Numbers</li>
-     * <li>the empty string for String compares</li>
-     * <li>Otherwise null is considered to be lower than anything else.</li>
-     * </ul>
+     * If the second object is an instance of Comparable, return -1 * the result of comparing against the first object.
+     * <p>
+     * Otherwise, error.
      *
      * @param ctx  the context in which this comparison is taking place
      * @param obj0 first object
@@ -79,14 +78,17 @@ public class ELSupport {
      *
      * @return -1, 0, or 1 if this object is less than, equal to, or greater than val.
      *
-     * @throws ELException          if neither object is Comparable
-     * @throws ClassCastException   if the objects are not mutually comparable
+     * @throws ELException          if the objects cannot be compared, including because they are not mutually
+     *                              comparable
      * @throws NullPointerException if either object is null
      */
     public static int compare(final ELContext ctx, final Object obj0, final Object obj1) throws ELException {
         if (obj0 == obj1 || equals(ctx, obj0, obj1)) {
             return 0;
         }
+        Objects.requireNonNull(obj0, MessageFactory.get("error.compare.null"));
+        Objects.requireNonNull(obj1, MessageFactory.get("error.compare.null"));
+
         if (isBigDecimalOp(obj0, obj1)) {
             BigDecimal bd0 = (BigDecimal) coerceToNumber(ctx, obj0, BigDecimal.class);
             BigDecimal bd1 = (BigDecimal) coerceToNumber(ctx, obj1, BigDecimal.class);
@@ -113,12 +115,20 @@ public class ELSupport {
         if (obj0 instanceof Comparable<?>) {
             @SuppressWarnings("unchecked") // checked above
             final Comparable<Object> comparable = (Comparable<Object>) obj0;
-            return (obj1 != null) ? comparable.compareTo(obj1) : 1;
+            try {
+                return comparable.compareTo(obj1);
+            } catch (ClassCastException cce) {
+                throw new ELException(MessageFactory.get("error.compare", obj0, obj1), cce);
+            }
         }
         if (obj1 instanceof Comparable<?>) {
             @SuppressWarnings("unchecked") // checked above
             final Comparable<Object> comparable = (Comparable<Object>) obj1;
-            return (obj0 != null) ? -comparable.compareTo(obj0) : -1;
+            try {
+                return -comparable.compareTo(obj0);
+            } catch (ClassCastException cce) {
+                throw new ELException(MessageFactory.get("error.compare", obj0, obj1), cce);
+            }
         }
         throw new ELException(MessageFactory.get("error.compare", obj0, obj1));
     }
@@ -330,7 +340,11 @@ public class ELSupport {
         }
         if (BigInteger.class.equals(type)) {
             if (number instanceof BigDecimal) {
-                return ((BigDecimal) number).toBigInteger();
+                try {
+                    return ((BigDecimal) number).toBigInteger();
+                } catch (ArithmeticException ae) {
+                    throw new ELException(MessageFactory.get("error.convert", number, number.getClass(), type), ae);
+                }
             }
             if (number instanceof BigInteger) {
                 return number;
@@ -344,7 +358,11 @@ public class ELSupport {
             if (number instanceof BigInteger) {
                 return new BigDecimal((BigInteger) number);
             }
-            return new BigDecimal(number.doubleValue());
+            try {
+                return new BigDecimal(number.doubleValue());
+            } catch (NumberFormatException nfe) {
+                throw new ELException(MessageFactory.get("error.convert", number, number.getClass(), type), nfe);
+            }
         }
         if (Byte.TYPE == type || Byte.class.equals(type)) {
             return Byte.valueOf(number.byteValue());

@@ -1,10 +1,10 @@
 # Tomcat Secure Embed
 
-Apache Tomcat **11.0.27**（2026-10 時点の 11 系最新）の公式ソースから、セキュリティ上不要な機能を**ソースごと削除**して再ビルドした、
+Apache Tomcat **11.0.29**（2026-11 時点の 11 系最新。正式発表前のリリース候補版を Apache のステージングリポジトリから取り込み）の公式ソースから、セキュリティ上不要な機能を**ソースごと削除**して再ビルドした、
 組み込み（Embedded）用 Tomcat です。
 
 - 対応: **HTTP/1.1（平文, NIO）**, **Servlet 6.1**, **JSP 4.0**, **EL 6.0**
-- 実行時の依存ライブラリ: **ECJ（JSP コンパイラ）のみ** — `org.eclipse.jdt:ecj:3.46.100`（Tomcat 11.0.27 公式と同じ版）
+- 実行時の依存ライブラリ: **ECJ（JSP コンパイラ）のみ** — `org.eclipse.jdt:ecj:3.46.100`（Tomcat 11.0.29 公式と同じ版）
 - 1 つの jar（`tomcat-secure-embed`）に core / EL / Jasper / annotations-api を統合
 
 削除は「設定で無効化」ではなく**クラス自体が存在しない**状態にしているため、設定ミスや攻撃者による再有効化はできません。
@@ -53,7 +53,7 @@ DataSource や設定値は JNDI ではなく、アプリケーション側（Spr
 - `ErrorReportValve`: スタックトレース・サーバーバージョンを**既定で非表示**
 - `DefaultServlet`: 常に読み取り専用、partial PUT 無効、サーバー情報非表示
 
-変更差分（59 ファイル）: [patches/tomcat-secure.patch](patches/tomcat-secure.patch)
+変更差分（60 ファイル）: [patches/tomcat-secure.patch](patches/tomcat-secure.patch)
 
 ## 使い方
 
@@ -70,7 +70,7 @@ DataSource や設定値は JNDI ではなく、アプリケーション側（Spr
 <dependency>
   <groupId>org.tamacat</groupId>
   <artifactId>tomcat-secure-embed</artifactId>
-  <version>11.0.27-1</version>
+  <version>11.0.29-1</version>
 </dependency>
 ```
 
@@ -92,7 +92,7 @@ server.await();
 コマンドライン:
 
 ```bash
-java -cp "tomcat-secure-embed-11.0.27-1.jar:ecj-3.46.100.jar" org.tamacat.tomcat.SecureTomcat --webapp ./webapp --port 8080
+java -cp "tomcat-secure-embed-11.0.29-1.jar:ecj-3.46.100.jar" org.tamacat.tomcat.SecureTomcat --webapp ./webapp --port 8080
 ```
 
 （Windows ではクラスパス区切りを `;` にしてください）
@@ -147,7 +147,7 @@ Tomcat 本体を含む全体スキャンの結果、上流からの削減効果�
 
 1. **検証:** JDK 17 で `mvn -Psast clean verify`（テスト + SAST）、JDK 25 でテスト。どちらもテスト 0 失敗・0 スキップが条件
 2. **公開:** 検証でビルドしたファイルそのもの（SHA-256 で照合）を `deploy-file` で `mvn-repo` に追加し、push。`release` 環境のレビュー承認が必要
-   - 公開済みのバージョンは上書きしません（警告を出してスキップ）。公開するには `pom.xml` のバージョンを上げてください（`11.0.27-1` → `11.0.27-2` など。親・子の両方）
+   - 公開済みのバージョンは上書きしません（警告を出してスキップ）。公開するには `pom.xml` のバージョンを上げてください（`11.0.29-1` → `11.0.29-2` など。親・子の両方）
    - 変更は `org/tamacat/tomcat-secure-parent/` と `org/tamacat/tomcat-secure-embed/` の新バージョンと `maven-metadata.xml` に限定され、それ以外の変更・削除があれば失敗します
    - `mvn-repo` は 1GB 超のため、必要なディレクトリだけを部分・スパースクローンします
 
@@ -163,21 +163,34 @@ mvn -Psast clean verify
 bash tools/collect-dist.sh target/dist
 git clone --depth 1 --filter=blob:none --sparse --branch mvn-repo https://github.com/tamacat/tamacat.github.io.git target/mvn-repo
 git -C target/mvn-repo sparse-checkout set org/tamacat/tomcat-secure-parent org/tamacat/tomcat-secure-embed
-bash tools/stage-mvn-repo.sh target/dist target/mvn-repo 11.0.27-1
+bash tools/stage-mvn-repo.sh target/dist target/mvn-repo 11.0.29-1
 ```
 
 ## Tomcat のバージョンアップ手順
 
 ```bash
 # 1. 新バージョンの公式ソースを取得（Maven Central、Apache Tomcat KEYS で GPG 署名検証）→ 削除 → パッチ適用
-bash tools/import-tomcat.sh 11.0.28
-# 2. pom.xml（親・子）の tomcat.version / ecj.version / version を更新（ECJ は上流の tomcat-embed-jasper の pom に合わせる。version は例: 11.0.28-1）
+bash tools/import-tomcat.sh 11.0.30
+# 2. pom.xml（親・子）の tomcat.version / ecj.version / version を更新（ECJ は上流の tomcat-embed-jasper の pom に合わせる。version は例: 11.0.30-1）
 # 3. ビルド・テスト。パッチが当たらない場合は手で修正後、差分を再生成
 mvn clean verify
 bash tools/make-patch.sh
 ```
 
-`tools/import-tomcat.sh 11.0.27` を実行すると、現在のソースとバイト単位で同一のものが再生成されます。
+`tools/import-tomcat.sh 11.0.29` を実行すると、現在のソースとバイト単位で同一のものが再生成されます。
+
+Maven Central にまだ無いバージョン（リリース投票中の候補版）は、`TOMCAT_MAVEN_REPO` で Apache のステージングリポジトリを指定して取り込めます。
+GPG 署名の検証は同じように行われます。指定できるのは `https://repo.maven.apache.org/` と `https://repository.apache.org/` 配下のみです。
+`tools/make-patch.sh` も同じ環境変数を引き継ぎます。
+
+```bash
+# 現在の 11.0.29 は、このステージングリポジトリ（投票中の候補版）から取り込んでいます
+TOMCAT_MAVEN_REPO=https://repository.apache.org/content/repositories/orgapachetomcat-1612 \
+  bash tools/import-tomcat.sh 11.0.29
+```
+
+候補版の中身は GitHub のリリースタグと同じで、後から変わることはありません（11.0.29 は Java ソース全ファイルがタグと一致することを確認済み）。
+投票で否決された場合は同じ番号を作り直さず、次の番号（例: 11.0.30）でリリースされるので、そのバージョンに上げてください。
 
 ## 制限事項・注意
 
